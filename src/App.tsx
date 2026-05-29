@@ -1,580 +1,95 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Archive,
   BatteryCharging,
   Brain,
   CalendarClock,
   Check,
-  ChevronDown,
-  Circle,
   Clock3,
   Command,
+  Cpu,
+  Download,
   ExternalLink,
   Flame,
   Focus,
-  Gauge,
-  Globe2,
   Inbox,
   Link,
-  Mail,
   MapPin,
   Moon,
-  MoreHorizontal,
   Palette,
-  Pause,
   Pencil,
   Play,
   Plus,
   RefreshCw,
-  RotateCcw,
   Search,
   Sparkles,
   SquareCheckBig,
-  Star,
-  Sun,
-  TimerReset,
   Trash2,
+  Upload,
   X,
-  Zap,
 } from 'lucide-react'
+import {
+  FocusControls,
+  IconByName,
+  OrderControls,
+  PanelTitle,
+  TaskRow,
+  ThemedSelect,
+} from './components'
+import type {
+  AiProvider,
+  DailyArchive,
+  DailyReview,
+  DashboardBackup,
+  DashboardState,
+  Project,
+  Quote,
+  QuickLink,
+  StoredDashboardState,
+  TaskKind,
+  Theme,
+  WeatherPosition,
+} from './types'
+import {
+  aiProviderDefaults,
+  aiProviderOptions,
+  defaultState,
+  dayModeOptions,
+  fallbackQuote,
+  getQuoteById,
+  linkIconOptions,
+  loadState,
+  normalizeQuotes,
+  pickQuoteId,
+  resolveDailyQuote,
+  STORAGE_KEY,
+  themeOptions,
+} from './dashboardState'
+import {
+  buildReviewPrompt,
+  getAiSettingsIssue,
+  requestAiSummary,
+} from './ai'
+import {
+  buildLocalSummary,
+  dateAfter,
+  daysUntil,
+  downloadTextFile,
+  formatDate,
+  formatTime,
+  normalizeHttpUrl,
+  readFileAsText,
+  todayIso,
+  uid,
+} from './utils'
+import {
+  geocodeCity,
+  getIpPosition,
+  getPosition,
+  weatherCodeMap,
+} from './weather'
+import { WeatherIcon } from './weatherIcon'
 import './App.css'
-
-type Theme = 'dark' | 'clean' | 'cyber' | 'paper'
-type DayMode = '工作日' | '周末' | '冲刺' | '摸鱼恢复'
-type TaskKind = 'top' | 'todo'
-
-type Task = {
-  id: string
-  title: string
-  done: boolean
-  kind: TaskKind
-}
-
-type Project = {
-  id: string
-  name: string
-  nextAction: string
-  minutes: number
-  active: boolean
-}
-
-type QuickLink = {
-  id: string
-  label: string
-  url: string
-  icon: string
-}
-
-type InboxItem = {
-  id: string
-  text: string
-  createdAt: string
-}
-
-type Reminder = {
-  id: string
-  title: string
-  date: string
-  type: string
-}
-
-type DailyReview = {
-  did: string
-  stuck: string
-  tomorrow: string
-}
-
-type SelectOption = {
-  value: string
-  label: string
-  icon?: React.ReactNode
-}
-
-type Weather = {
-  icon: string
-  temp: string
-  label: string
-  condition?: string
-  humidity?: string
-  latitude?: number
-  longitude?: number
-  updatedAt?: string
-}
-
-type WeatherPosition = {
-  latitude: number
-  longitude: number
-  label?: string
-}
-
-type Quote = {
-  id: string
-  text: string
-  author: string
-  enabled: boolean
-}
-
-type DailyQuote = {
-  date: string
-  quoteId: string
-}
-
-type FocusSession = {
-  running: boolean
-  secondsLeft: number
-  durationMinutes: number
-  projectId: string
-  taskLabel: string
-}
-
-type DashboardState = {
-  motto?: string
-  quotePoolVersion: number
-  quotePool: Quote[]
-  dailyQuote: DailyQuote
-  theme: Theme
-  dayMode: DayMode
-  energy: number
-  weather: Weather
-  currentFocus: string
-  tasks: Task[]
-  projects: Project[]
-  quickLinks: QuickLink[]
-  inbox: InboxItem[]
-  reminders: Reminder[]
-  review: DailyReview
-  focus: FocusSession
-}
-
-type StoredDashboardState = Partial<DashboardState> & {
-  motto?: string
-}
-
-const STORAGE_KEY = 'personal-command-dashboard-v1'
-const QUOTE_POOL_VERSION = 2
-
-const uid = () => crypto.randomUUID()
-
-const todayIso = () => new Date().toISOString().slice(0, 10)
-
-const dateAfter = (days: number) => {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-
-const defaultQuotes: Quote[] = [
-  {
-    id: 'quote-turing-short-road',
-    text: '我们只能看见前方很短的一段路，但能看见那里有许多事要做。',
-    author: 'Alan Turing',
-    enabled: true,
-  },
-  {
-    id: 'quote-drucker-future',
-    text: '预测未来最好的方法，就是把它创造出来。',
-    author: 'Peter Drucker',
-    enabled: true,
-  },
-  {
-    id: 'quote-mlk-staircase',
-    text: '你不需要看完整个楼梯，只要踏出第一步。',
-    author: 'Martin Luther King Jr.',
-    enabled: true,
-  },
-  {
-    id: 'quote-clarke-magic',
-    text: '任何足够先进的技术，都与魔法无异。',
-    author: 'Arthur C. Clarke',
-    enabled: true,
-  },
-  {
-    id: 'quote-einstein-explain',
-    text: '如果你不能把它解释清楚，你就还没有真正理解它。',
-    author: 'Albert Einstein',
-    enabled: true,
-  },
-  {
-    id: 'quote-edison-failure',
-    text: '我没有失败。我只是发现了一万种行不通的方法。',
-    author: 'Thomas Edison',
-    enabled: true,
-  },
-  {
-    id: 'quote-edison-genius',
-    text: '天才是百分之一的灵感，加上百分之九十九的汗水。',
-    author: 'Thomas Edison',
-    enabled: true,
-  },
-  {
-    id: 'quote-luce-simplicity',
-    text: '简单是复杂的最终形态。',
-    author: 'Clare Boothe Luce',
-    enabled: true,
-  },
-  {
-    id: 'quote-kierkegaard-life',
-    text: '生活只能向后理解，但必须向前生活。',
-    author: 'Søren Kierkegaard',
-    enabled: true,
-  },
-  {
-    id: 'quote-einstein-question',
-    text: '重要的不是停止提问。',
-    author: 'Albert Einstein',
-    enabled: true,
-  },
-  {
-    id: 'quote-pasteur-chance',
-    text: '机会总是留给有准备的人。',
-    author: 'Louis Pasteur',
-    enabled: true,
-  },
-  {
-    id: 'quote-socrates-ignorance',
-    text: '知道自己无知，才是真正的知识。',
-    author: 'Socrates',
-    enabled: true,
-  },
-  {
-    id: 'quote-maya-angelou-courage',
-    text: '勇气是所有美德中最重要的，因为没有勇气，你无法持续实践其他任何美德。',
-    author: 'Maya Angelou',
-    enabled: true,
-  },
-  {
-    id: 'quote-confucius-mountain',
-    text: '移山的人，是从搬走小石头开始的。',
-    author: 'Confucius',
-    enabled: true,
-  },
-]
-
-const fallbackQuote: Quote = {
-  id: 'quote-fallback',
-  text: '先做最重要的那一步。',
-  author: 'Custom',
-  enabled: true,
-}
-
-const pickQuoteId = (quotes: Quote[], excludedId?: string) => {
-  const enabledQuotes = quotes.filter((quote) => quote.enabled)
-  if (!enabledQuotes.length) return fallbackQuote.id
-  const candidates = enabledQuotes.filter((quote) => quote.id !== excludedId)
-  const pool = candidates.length ? candidates : enabledQuotes
-  return pool[Math.floor(Math.random() * pool.length)].id
-}
-
-const getQuoteById = (quotes: Quote[], quoteId: string) =>
-  quotes.find((quote) => quote.id === quoteId && quote.enabled)
-
-const resolveDailyQuote = (
-  quotePool: Quote[],
-  dailyQuote?: Partial<DailyQuote>,
-): DailyQuote => {
-  const today = todayIso()
-  if (
-    dailyQuote?.date === today &&
-    dailyQuote.quoteId &&
-    getQuoteById(quotePool, dailyQuote.quoteId)
-  ) {
-    return { date: today, quoteId: dailyQuote.quoteId }
-  }
-
-  return { date: today, quoteId: pickQuoteId(quotePool) }
-}
-
-const normalizeQuotes = (parsed: StoredDashboardState) => {
-  const quotePool =
-    Array.isArray(parsed.quotePool)
-      ? parsed.quotePool
-          .map((quote) => ({
-            ...quote,
-            id: quote.id || uid(),
-            text: quote.text?.trim() ?? '',
-            author: quote.author?.trim() ?? '',
-            enabled: quote.enabled !== false,
-          }))
-          .filter((quote) => quote.text && quote.author)
-      : defaultQuotes
-
-  const existingQuoteIds = new Set(quotePool.map((quote) => quote.id))
-  const upgradedQuotePool =
-    (parsed.quotePoolVersion ?? 1) < QUOTE_POOL_VERSION
-      ? [
-          ...quotePool,
-          ...defaultQuotes.filter((quote) => !existingQuoteIds.has(quote.id)),
-        ]
-      : quotePool
-
-  const legacyMotto = parsed.motto?.trim()
-  const migratedQuotePool =
-    legacyMotto && !upgradedQuotePool.some((quote) => quote.text === legacyMotto)
-      ? [
-          ...upgradedQuotePool,
-          {
-            id: uid(),
-            text: legacyMotto,
-            author: 'Custom',
-            enabled: true,
-          },
-        ]
-      : upgradedQuotePool
-
-  return {
-    quotePoolVersion: QUOTE_POOL_VERSION,
-    quotePool: migratedQuotePool,
-    dailyQuote: resolveDailyQuote(migratedQuotePool, parsed.dailyQuote),
-  }
-}
-
-const defaultState: DashboardState = {
-  quotePoolVersion: QUOTE_POOL_VERSION,
-  quotePool: defaultQuotes,
-  dailyQuote: { date: todayIso(), quoteId: pickQuoteId(defaultQuotes) },
-  theme: 'dark',
-  dayMode: '工作日',
-  energy: 4,
-  weather: {
-    icon: '☀',
-    temp: '27°',
-    label: 'Hong Kong',
-    condition: '手动天气',
-  },
-  currentFocus: '个人指挥台 MVP',
-  tasks: [
-    { id: uid(), title: '确定今天最重要的一个推进点', done: false, kind: 'top' },
-    { id: uid(), title: '完成个人指挥台本地版主界面', done: false, kind: 'top' },
-    { id: uid(), title: '睡前写 3 分钟复盘', done: false, kind: 'top' },
-    { id: uid(), title: '整理下载文件夹', done: false, kind: 'todo' },
-    { id: uid(), title: '回复两封需要处理的邮件', done: true, kind: 'todo' },
-  ],
-  projects: [
-    {
-      id: uid(),
-      name: '个人指挥台',
-      nextAction: '把常用入口和今日面板调顺手',
-      minutes: 0,
-      active: true,
-    },
-    {
-      id: uid(),
-      name: '健身',
-      nextAction: '安排下一次 30 分钟力量训练',
-      minutes: 0,
-      active: true,
-    },
-    {
-      id: uid(),
-      name: '写作',
-      nextAction: '写一段关于本周状态的短笔记',
-      minutes: 0,
-      active: true,
-    },
-  ],
-  quickLinks: [
-    { id: uid(), label: 'GitHub', url: 'https://github.com', icon: 'github' },
-    { id: uid(), label: 'ChatGPT', url: 'https://chat.openai.com', icon: 'sparkles' },
-    { id: uid(), label: 'Gemini', url: 'https://gemini.google.com', icon: 'zap' },
-    { id: uid(), label: 'Mail', url: 'https://mail.google.com', icon: 'mail' },
-    { id: uid(), label: 'Calendar', url: 'https://calendar.google.com', icon: 'calendar' },
-    { id: uid(), label: 'Docs', url: 'https://docs.google.com', icon: 'doc' },
-  ],
-  inbox: [
-    {
-      id: uid(),
-      text: '做个自动整理截图的小工具',
-      createdAt: new Date().toISOString(),
-    },
-  ],
-  reminders: [
-    { id: uid(), title: '信用卡账单', date: dateAfter(5), type: '账单' },
-    { id: uid(), title: '妈妈生日', date: dateAfter(19), type: '生日' },
-    { id: uid(), title: 'Side Project 里程碑', date: dateAfter(12), type: 'Deadline' },
-  ],
-  review: {
-    did: '',
-    stuck: '',
-    tomorrow: '',
-  },
-  focus: {
-    running: false,
-    secondsLeft: 25 * 60,
-    durationMinutes: 25,
-    projectId: '',
-    taskLabel: '',
-  },
-}
-
-const dayModeOptions = [
-  { value: '工作日' as DayMode, label: '工作日', icon: <Gauge size={15} /> },
-  { value: '周末' as DayMode, label: '周末', icon: <Sun size={15} /> },
-  { value: '冲刺' as DayMode, label: '冲刺', icon: <Flame size={15} /> },
-  { value: '摸鱼恢复' as DayMode, label: '恢复', icon: <Moon size={15} /> },
-]
-
-const themeOptions = [
-  { value: 'dark', label: '深色', icon: <Moon size={15} /> },
-  { value: 'clean', label: '清爽', icon: <Sun size={15} /> },
-  { value: 'cyber', label: '赛博朋克', icon: <Zap size={15} /> },
-  { value: 'paper', label: '纸质笔记', icon: <Pencil size={15} /> },
-]
-
-const linkIconOptions = [
-  { value: 'link', label: 'Link', icon: <Link size={15} /> },
-  { value: 'github', label: 'GitHub', icon: <Globe2 size={15} /> },
-  { value: 'sparkles', label: 'AI', icon: <Sparkles size={15} /> },
-  { value: 'zap', label: 'Zap', icon: <Zap size={15} /> },
-  { value: 'mail', label: 'Mail', icon: <Mail size={15} /> },
-  { value: 'calendar', label: 'Calendar', icon: <CalendarClock size={15} /> },
-  { value: 'doc', label: 'Docs', icon: <Pencil size={15} /> },
-]
-
-function loadState(): DashboardState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return defaultState
-    const parsed = JSON.parse(raw) as StoredDashboardState
-    const quotes = normalizeQuotes(parsed)
-    return {
-      ...defaultState,
-      ...parsed,
-      motto: undefined,
-      ...quotes,
-      weather: { ...defaultState.weather, ...parsed.weather },
-      focus: { ...defaultState.focus, ...parsed.focus, running: false },
-      review: { ...defaultState.review, ...parsed.review },
-      tasks: parsed.tasks?.length ? parsed.tasks : defaultState.tasks,
-      projects: parsed.projects?.length ? parsed.projects : defaultState.projects,
-      quickLinks: parsed.quickLinks?.length
-        ? parsed.quickLinks
-        : defaultState.quickLinks,
-      reminders: parsed.reminders?.length ? parsed.reminders : defaultState.reminders,
-      inbox: parsed.inbox ?? defaultState.inbox,
-    }
-  } catch {
-    return defaultState
-  }
-}
-
-const formatTime = (date: Date) =>
-  new Intl.DateTimeFormat('zh-Hans-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(date)
-
-const formatDate = (date: Date) =>
-  new Intl.DateTimeFormat('zh-Hans-CN', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  }).format(date)
-
-const formatMinutes = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60)
-  const rest = seconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
-}
-
-const daysUntil = (dateString: string) => {
-  const today = new Date(todayIso())
-  const target = new Date(dateString)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
-}
-
-const weatherCodeMap: Record<number, { icon: string; label: string }> = {
-  0: { icon: '☀', label: '晴' },
-  1: { icon: '🌤', label: '大致晴朗' },
-  2: { icon: '⛅', label: '局部多云' },
-  3: { icon: '☁', label: '阴' },
-  45: { icon: '🌫', label: '雾' },
-  48: { icon: '🌫', label: '雾凇' },
-  51: { icon: '🌦', label: '小毛毛雨' },
-  53: { icon: '🌦', label: '毛毛雨' },
-  55: { icon: '🌧', label: '大毛毛雨' },
-  61: { icon: '🌧', label: '小雨' },
-  63: { icon: '🌧', label: '中雨' },
-  65: { icon: '🌧', label: '大雨' },
-  71: { icon: '🌨', label: '小雪' },
-  73: { icon: '🌨', label: '中雪' },
-  75: { icon: '❄', label: '大雪' },
-  80: { icon: '🌦', label: '阵雨' },
-  81: { icon: '🌧', label: '强阵雨' },
-  82: { icon: '⛈', label: '暴雨' },
-  95: { icon: '⛈', label: '雷暴' },
-  96: { icon: '⛈', label: '雷暴冰雹' },
-  99: { icon: '⛈', label: '强雷暴冰雹' },
-}
-
-const getPosition = () =>
-  new Promise<WeatherPosition>((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('浏览器没有开放定位能力'))
-      return
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) =>
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }),
-      reject,
-      {
-        enableHighAccuracy: false,
-        maximumAge: 15 * 60 * 1000,
-        timeout: 10_000,
-      },
-    )
-  })
-
-const getIpPosition = async () => {
-  const response = await fetch('https://ipapi.co/json/')
-  if (!response.ok) throw new Error('无法获取当前位置')
-  const data = (await response.json()) as {
-    latitude?: number
-    longitude?: number
-    city?: string
-    region?: string
-  }
-  if (data.latitude == null || data.longitude == null) {
-    throw new Error('定位数据不完整')
-  }
-  return {
-    latitude: data.latitude,
-    longitude: data.longitude,
-    label: data.city || data.region,
-  }
-}
-
-const geocodeCity = async (city: string) => {
-  const params = new URLSearchParams({
-    name: city,
-    count: '1',
-    language: 'zh',
-    format: 'json',
-  })
-  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?${params}`)
-  if (!response.ok) throw new Error('城市查询失败')
-  const data = (await response.json()) as {
-    results?: Array<{
-      name: string
-      latitude: number
-      longitude: number
-      country?: string
-      admin1?: string
-    }>
-  }
-  const result = data.results?.[0]
-  if (!result) throw new Error('没找到这个城市')
-
-  return {
-    latitude: result.latitude,
-    longitude: result.longitude,
-    label: [result.name, result.admin1, result.country].filter(Boolean).slice(0, 2).join(' · '),
-  }
-}
 
 function App() {
   const [dashboard, setDashboard] = useState<DashboardState>(() => loadState())
@@ -599,9 +114,32 @@ function App() {
   const [weatherLoading, setWeatherLoading] = useState(false)
   const [weatherError, setWeatherError] = useState('')
   const [editingQuickLinkId, setEditingQuickLinkId] = useState<string | null>(null)
+  const [editingQuickLinkUrl, setEditingQuickLinkUrl] = useState('')
+  const [dataNotice, setDataNotice] = useState('')
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [addingTopTask, setAddingTopTask] = useState(false)
+  const [addingTodo, setAddingTodo] = useState(false)
+  const [addingProject, setAddingProject] = useState(false)
+  const [addingQuickLink, setAddingQuickLink] = useState(false)
+  const [addingReminder, setAddingReminder] = useState(false)
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const [movedOrderItem, setMovedOrderItem] = useState<{
+    id: string
+    direction: 'up' | 'down'
+  } | null>(null)
+  const weatherRequestId = useRef(0)
 
   const updateDashboard = useCallback((updater: (current: DashboardState) => DashboardState) => {
     setDashboard(updater)
+  }, [])
+
+  const markOrderMove = useCallback((id: string, direction: 'up' | 'down') => {
+    setMovedOrderItem({ id, direction })
+    window.setTimeout(() => {
+      setMovedOrderItem((current) => (current?.id === id ? null : current))
+    }, 280)
   }, [])
 
   useEffect(() => {
@@ -665,7 +203,10 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  const fetchWeatherForPosition = useCallback(async (position: WeatherPosition) => {
+  const fetchWeatherForPosition = useCallback(async (
+    position: WeatherPosition,
+    requestId: number,
+  ) => {
     const { latitude, longitude } = position
     const params = new URLSearchParams({
       latitude: latitude.toFixed(4),
@@ -675,6 +216,7 @@ function App() {
     })
     const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`)
     if (!response.ok) throw new Error('天气服务暂时不可用')
+    if (requestId !== weatherRequestId.current) return
 
     const data = (await response.json()) as {
       current?: {
@@ -684,6 +226,7 @@ function App() {
       }
       timezone?: string
     }
+    if (requestId !== weatherRequestId.current) return
     const current = data.current
     if (!current || current.temperature_2m == null) {
       throw new Error('天气数据不完整')
@@ -692,28 +235,33 @@ function App() {
     const temperature = current.temperature_2m
     const weatherCode = current.weather_code ?? 0
     const mapped = weatherCodeMap[weatherCode] ?? { icon: '🌡', label: '实时天气' }
-    updateDashboard((state) => ({
-      ...state,
-      weather: {
-        icon: mapped.icon,
-        temp: `${Math.round(temperature)}°`,
-        label:
-          position.label ??
-          data.timezone?.split('/').pop()?.replaceAll('_', ' ') ??
-          '当前位置',
-        condition: mapped.label,
-        humidity:
-          current.relative_humidity_2m == null
-            ? undefined
-            : `${Math.round(current.relative_humidity_2m)}%`,
-        updatedAt: new Date().toISOString(),
-        latitude,
-        longitude,
-      },
-    }))
+    updateDashboard((state) => {
+      if (requestId !== weatherRequestId.current) return state
+      return {
+        ...state,
+        weather: {
+          icon: mapped.icon,
+          temp: `${Math.round(temperature)}°`,
+          label:
+            position.label ??
+            data.timezone?.split('/').pop()?.replaceAll('_', ' ') ??
+            '当前位置',
+          condition: mapped.label,
+          humidity:
+            current.relative_humidity_2m == null
+              ? undefined
+              : `${Math.round(current.relative_humidity_2m)}%`,
+          updatedAt: new Date().toISOString(),
+          latitude,
+          longitude,
+        },
+      }
+    })
   }, [updateDashboard])
 
   const refreshWeather = useCallback(async () => {
+    const requestId = weatherRequestId.current + 1
+    weatherRequestId.current = requestId
     setWeatherLoading(true)
     setWeatherError('')
 
@@ -726,11 +274,16 @@ function App() {
               label: dashboard.weather.label,
             }
           : await getPosition().catch(() => getIpPosition())
-      await fetchWeatherForPosition(position)
+      if (requestId !== weatherRequestId.current) return
+      await fetchWeatherForPosition(position, requestId)
     } catch (error) {
-      setWeatherError(error instanceof Error ? error.message : '天气查询失败')
+      if (requestId === weatherRequestId.current) {
+        setWeatherError(error instanceof Error ? error.message : '天气查询失败')
+      }
     } finally {
-      setWeatherLoading(false)
+      if (requestId === weatherRequestId.current) {
+        setWeatherLoading(false)
+      }
     }
   }, [
     dashboard.weather.label,
@@ -743,15 +296,22 @@ function App() {
     const trimmed = city.trim()
     if (!trimmed) return
 
+    const requestId = weatherRequestId.current + 1
+    weatherRequestId.current = requestId
     setWeatherLoading(true)
     setWeatherError('')
     try {
       const location = await geocodeCity(trimmed)
-      await fetchWeatherForPosition(location)
+      if (requestId !== weatherRequestId.current) return
+      await fetchWeatherForPosition(location, requestId)
     } catch (error) {
-      setWeatherError(error instanceof Error ? error.message : '城市设置失败')
+      if (requestId === weatherRequestId.current) {
+        setWeatherError(error instanceof Error ? error.message : '城市设置失败')
+      }
     } finally {
-      setWeatherLoading(false)
+      if (requestId === weatherRequestId.current) {
+        setWeatherLoading(false)
+      }
     }
   }, [fetchWeatherForPosition])
 
@@ -764,11 +324,28 @@ function App() {
   const completionRate = dashboard.tasks.length
     ? Math.round((completedTasks / dashboard.tasks.length) * 100)
     : 0
-  const priorityTask = topTasks.find((task) => !task.done) ?? todos.find((task) => !task.done)
+  const priorityTopTask = topTasks.find((task) => !task.done)
+  const priorityTodo = todos.find((task) => !task.done)
   const suggestedProject =
     activeProject ?? dashboard.projects.find((project) => project.active) ?? dashboard.projects[0]
-  const suggestedAction =
-    priorityTask?.title ?? suggestedProject?.nextAction ?? '先写下一个可以立刻开始的动作'
+  const defaultFocusProject =
+    dashboard.projects.find((project) => project.name === '个人指挥台') ??
+    dashboard.projects.find((project) => project.active) ??
+    dashboard.projects[0]
+  const focusTarget = priorityTopTask
+    ? {
+        label: priorityTopTask.title,
+        source: '来自 Top 3',
+      }
+    : priorityTodo
+      ? {
+          label: priorityTodo.title,
+          source: '来自普通待办',
+        }
+      : {
+          label: suggestedProject?.nextAction ?? '先写下一个可以立刻开始的动作',
+          source: suggestedProject ? '来自项目推进' : '等待设置目标',
+        }
   const totalFocusMinutes = dashboard.projects.reduce(
     (total, project) => total + project.minutes,
     0,
@@ -776,7 +353,6 @@ function App() {
   const upcomingReminders = dashboard.reminders
     .slice()
     .sort((a, b) => daysUntil(a.date) - daysUntil(b.date))
-  const nextReminder = upcomingReminders[0]
   const urgentReminderCount = upcomingReminders.filter((item) => {
     const days = daysUntil(item.date)
     return days >= 0 && days <= 3
@@ -784,6 +360,12 @@ function App() {
   const todaysQuote =
     getQuoteById(dashboard.quotePool, dashboard.dailyQuote.quoteId) ?? fallbackQuote
   const canAddQuote = newQuoteText.trim().length > 0 && newQuoteAuthor.trim().length > 0
+  const editingQuickLink = dashboard.quickLinks.find(
+    (item) => item.id === editingQuickLinkId,
+  )
+  const latestArchive = dashboard.archives[0]
+  const aiSettingsIssue = getAiSettingsIssue(dashboard.ai)
+  const summaryModeLabel = dashboard.ai.enabled ? 'AI 总结' : '本地总结'
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -892,8 +474,13 @@ function App() {
       ...current,
       tasks: [...current.tasks, { id: uid(), title, done: false, kind }],
     }))
-    if (kind === 'top') setNewTopTask('')
-    else setNewTodo('')
+    if (kind === 'top') {
+      setNewTopTask('')
+      setAddingTopTask(false)
+    } else {
+      setNewTodo('')
+      setAddingTodo(false)
+    }
   }
 
   const toggleTask = useCallback((id: string) => {
@@ -912,6 +499,33 @@ function App() {
     }))
   }
 
+  const moveTaskWithinKind = (id: string, direction: 'up' | 'down') => {
+    let moved = false
+    updateDashboard((current) => {
+      const task = current.tasks.find((item) => item.id === id)
+      if (!task) return current
+
+      const group = current.tasks.filter((item) => item.kind === task.kind)
+      const groupIndex = group.findIndex((item) => item.id === id)
+      const targetGroupIndex = direction === 'up' ? groupIndex - 1 : groupIndex + 1
+      if (groupIndex < 0 || targetGroupIndex < 0 || targetGroupIndex >= group.length) {
+        return current
+      }
+
+      const target = group[targetGroupIndex]
+      moved = true
+      return {
+        ...current,
+        tasks: current.tasks.map((item) => {
+          if (item.id === id) return target
+          if (item.id === target.id) return task
+          return item
+        }),
+      }
+    })
+    if (moved) markOrderMove(id, direction)
+  }
+
   const addProject = () => {
     const name = newProjectName.trim()
     const nextAction = newProjectAction.trim()
@@ -925,6 +539,7 @@ function App() {
     }))
     setNewProjectName('')
     setNewProjectAction('')
+    setAddingProject(false)
   }
 
   const updateProject = (id: string, patch: Partial<Project>) => {
@@ -947,6 +562,23 @@ function App() {
     }))
   }
 
+  const moveProject = (id: string, direction: 'up' | 'down') => {
+    let moved = false
+    updateDashboard((current) => {
+      const index = current.projects.findIndex((project) => project.id === id)
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.projects.length) {
+        return current
+      }
+
+      const projects = [...current.projects]
+      ;[projects[index], projects[targetIndex]] = [projects[targetIndex], projects[index]]
+      moved = true
+      return { ...current, projects }
+    })
+    if (moved) markOrderMove(id, direction)
+  }
+
   const addInboxItem = () => {
     const text = newInboxText.trim()
     if (!text) return
@@ -966,19 +598,19 @@ function App() {
 
   const addQuickLink = () => {
     const label = newLinkLabel.trim()
-    const url = newLinkUrl.trim()
+    const url = normalizeHttpUrl(newLinkUrl)
     if (!label || !url) return
-    const withProtocol = /^https?:\/\//i.test(url) ? url : `https://${url}`
     updateDashboard((current) => ({
       ...current,
       quickLinks: [
         ...current.quickLinks,
-        { id: uid(), label, url: withProtocol, icon: newLinkIcon },
+        { id: uid(), label, url, icon: newLinkIcon },
       ],
     }))
     setNewLinkLabel('')
     setNewLinkUrl('')
     setNewLinkIcon('link')
+    setAddingQuickLink(false)
   }
 
   const removeQuickLink = (id: string) => {
@@ -992,9 +624,22 @@ function App() {
     updateDashboard((current) => ({
       ...current,
       quickLinks: current.quickLinks.map((item) =>
-        item.id === id ? { ...item, ...patch } : item,
+        item.id === id
+          ? {
+              ...item,
+              ...patch,
+              label: patch.label ?? item.label,
+              icon: patch.icon ?? item.icon,
+            }
+          : item,
       ),
     }))
+  }
+
+  const commitQuickLinkUrl = (id: string, value: string) => {
+    const normalized = normalizeHttpUrl(value)
+    if (!normalized) return
+    updateQuickLink(id, { url: normalized })
   }
 
   const addReminder = () => {
@@ -1010,6 +655,7 @@ function App() {
     setNewReminderTitle('')
     setNewReminderDate(dateAfter(7))
     setNewReminderType('Deadline')
+    setAddingReminder(false)
   }
 
   const removeReminder = (id: string) => {
@@ -1023,20 +669,30 @@ function App() {
     const project =
       dashboard.projects.find((item) => item.id === projectId) ?? dashboard.projects[0]
     if (!project) return
-    updateDashboard((current) => ({
-      ...current,
-      currentFocus: taskLabel || project.nextAction,
-      focus: {
-        ...current.focus,
-        running: true,
-        projectId: project.id,
-        taskLabel: taskLabel || project.nextAction,
-        secondsLeft:
-          current.focus.secondsLeft === current.focus.durationMinutes * 60
+
+    updateDashboard((current) => {
+      const nextLabel = taskLabel || project.nextAction
+      const isSamePausedFocus =
+        !current.focus.running &&
+        current.focus.projectId === project.id &&
+        current.focus.taskLabel === nextLabel &&
+        current.focus.secondsLeft > 0 &&
+        current.focus.secondsLeft < current.focus.durationMinutes * 60
+
+      return {
+        ...current,
+        currentFocus: nextLabel,
+        focus: {
+          ...current.focus,
+          running: true,
+          projectId: project.id,
+          taskLabel: nextLabel,
+          secondsLeft: isSamePausedFocus
             ? current.focus.secondsLeft
-            : current.focus.secondsLeft,
-      },
-    }))
+            : current.focus.durationMinutes * 60,
+        },
+      }
+    })
   }, [dashboard.focus.projectId, dashboard.projects, updateDashboard])
 
   const commandResults = useMemo(() => {
@@ -1117,7 +773,9 @@ function App() {
       focus: {
         ...current.focus,
         durationMinutes,
-        secondsLeft: durationMinutes * 60,
+        secondsLeft: current.focus.running
+          ? current.focus.secondsLeft
+          : durationMinutes * 60,
       },
     }))
   }
@@ -1127,6 +785,152 @@ function App() {
       ...current,
       review: { ...current.review, ...patch },
     }))
+  }
+
+  const updateAiSettings = (patch: Partial<DashboardState['ai']>) => {
+    updateDashboard((current) => ({
+      ...current,
+      ai: { ...current.ai, ...patch },
+    }))
+    setAiError('')
+  }
+
+  const setAiProvider = (provider: AiProvider) => {
+    updateDashboard((current) => {
+      const preset = aiProviderDefaults[provider]
+      return {
+        ...current,
+        ai: {
+          ...current.ai,
+          provider,
+          baseUrl: preset.baseUrl || current.ai.baseUrl,
+          model: preset.model || current.ai.model,
+        },
+      }
+    })
+    setAiError('')
+  }
+
+  const generateReviewSummary = async () => {
+    if (!dashboard.ai.enabled) {
+      updateDashboard((current) => {
+        const completed = current.tasks.filter((task) => task.done)
+        const open = current.tasks.filter((task) => !task.done)
+        return {
+          ...current,
+          reviewSummary: buildLocalSummary(current.review, completed, open, current.inbox),
+        }
+      })
+      setAiError('')
+      setDataNotice('已生成本地总结')
+      return
+    }
+
+    const issue = getAiSettingsIssue(dashboard.ai)
+    if (issue) {
+      setAiError(issue)
+      setAiSettingsOpen(true)
+      return
+    }
+
+    setAiLoading(true)
+    setAiError('')
+    try {
+      const summary = await requestAiSummary(dashboard.ai, buildReviewPrompt(dashboard))
+      updateDashboard((current) => ({
+        ...current,
+        reviewSummary: summary,
+      }))
+      setDataNotice('AI 总结已生成')
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'AI 总结生成失败')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const archiveToday = () => {
+    updateDashboard((current) => {
+      const completed = current.tasks.filter((task) => task.done)
+      const open = current.tasks.filter((task) => !task.done)
+      const summary =
+        current.reviewSummary ||
+        buildLocalSummary(current.review, completed, open, current.inbox)
+      const archive: DailyArchive = {
+        id: uid(),
+        date: todayIso(),
+        createdAt: new Date().toISOString(),
+        completedTasks: completed,
+        openTasks: open,
+        inbox: current.inbox,
+        review: current.review,
+        summary,
+        totalFocusMinutes: current.projects.reduce(
+          (total, project) => total + project.minutes,
+          0,
+        ),
+      }
+
+      return {
+        ...current,
+        archives: [
+          archive,
+          ...current.archives.filter((item) => item.date !== archive.date),
+        ].slice(0, 60),
+        reviewSummary: summary,
+      }
+    })
+    setDataNotice('已归档今天')
+  }
+
+  const exportBackup = () => {
+    const backup: DashboardBackup = {
+      app: 'Personal Command Deck',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      state: dashboard,
+    }
+    downloadTextFile(
+      `personal-command-deck-${todayIso()}.json`,
+      JSON.stringify(backup, null, 2),
+    )
+    setDataNotice('已导出备份')
+  }
+
+  const importBackup = async (file: File) => {
+    try {
+      const text = await readFileAsText(file)
+      const parsed = JSON.parse(text) as Partial<DashboardBackup> | StoredDashboardState
+      const incoming =
+        'state' in parsed && parsed.state
+          ? (parsed.state as StoredDashboardState)
+          : (parsed as StoredDashboardState)
+      const quotes = normalizeQuotes(incoming)
+      setDashboard({
+        ...defaultState,
+        ...incoming,
+        motto: undefined,
+        ...quotes,
+        weather: { ...defaultState.weather, ...incoming.weather },
+        focus: { ...defaultState.focus, ...incoming.focus, running: false },
+        review: { ...defaultState.review, ...incoming.review },
+        ai: { ...defaultState.ai, ...incoming.ai },
+        tasks: incoming.tasks?.length ? incoming.tasks : defaultState.tasks,
+        projects: incoming.projects?.length ? incoming.projects : defaultState.projects,
+        quickLinks: incoming.quickLinks?.length
+          ? incoming.quickLinks
+          : defaultState.quickLinks,
+        reminders: incoming.reminders?.length
+          ? incoming.reminders
+          : defaultState.reminders,
+        inbox: incoming.inbox ?? defaultState.inbox,
+        archives: incoming.archives ?? defaultState.archives,
+        reviewSummary: incoming.reviewSummary ?? defaultState.reviewSummary,
+      })
+      setDataNotice('已导入备份')
+    } catch {
+      setDataNotice('导入失败：文件格式不对')
+    }
   }
 
   return (
@@ -1145,6 +949,9 @@ function App() {
             <div className="compact-edit">
               <input
                 aria-label="天气城市"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={dashboard.weather.label}
                 placeholder="城市，如 Hong Kong"
                 onChange={(event) =>
@@ -1192,7 +999,12 @@ function App() {
                 title="设置天气城市"
                 onClick={() => setEditingWeather(true)}
               >
-                <span className="weather-icon">{dashboard.weather.icon}</span>
+                <span className="weather-icon">
+                  <WeatherIcon
+                    condition={dashboard.weather.condition}
+                    fallback={dashboard.weather.icon}
+                  />
+                </span>
                 <span className="weather-main">
                   <strong>{dashboard.weather.temp}</strong>
                   {dashboard.weather.condition && <em>{dashboard.weather.condition}</em>}
@@ -1229,13 +1041,6 @@ function App() {
           </button>
         </section>
 
-        <section className="status-block focus-block" aria-label="当前专注">
-          <Focus size={18} />
-          <div>
-            <span>当前专注</span>
-            <strong>{dashboard.currentFocus}</strong>
-          </div>
-        </section>
       </header>
 
       <section className="control-strip" aria-label="个人状态控制">
@@ -1306,6 +1111,26 @@ function App() {
           }
         />
 
+        <div className="data-actions" aria-label="本地数据">
+          <button type="button" title="导出本地备份" onClick={exportBackup}>
+            <Download size={15} />
+            导出
+          </button>
+          <label title="导入本地备份">
+            <Upload size={15} />
+            导入
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void importBackup(file)
+                event.currentTarget.value = ''
+              }}
+            />
+          </label>
+        </div>
+
         <button
           className="command-trigger"
           type="button"
@@ -1317,9 +1142,53 @@ function App() {
         </button>
       </section>
 
-      <section className="routine-start" aria-label="启动工作区">
+      <section className="execution-hero" aria-label="执行启动区">
+        <article className="panel focus-start-panel">
+          <PanelTitle icon={<Focus size={20} />} title="今日专注" aside={`${completionRate}%`} />
+          <div className="focus-priority">
+            <span>本轮目标</span>
+            <strong>{focusTarget.label}</strong>
+            <small className="focus-source">{focusTarget.source}</small>
+          </div>
+          <FocusControls
+            dashboard={dashboard}
+            focusLabel={dashboard.focus.running ? dashboard.currentFocus : focusTarget.label}
+            onDurationChange={setFocusDuration}
+            onStart={() => startFocus(defaultFocusProject?.id, focusTarget.label)}
+            onPause={pauseFocus}
+            onReset={resetFocus}
+          />
+          <div className="focus-signals">
+            <div className="focus-signal">
+              <span>今日完成</span>
+              <strong>{completedTasks}/{dashboard.tasks.length}</strong>
+            </div>
+            <div className="focus-signal">
+              <span>专注累计</span>
+              <strong>{totalFocusMinutes} 分钟</strong>
+            </div>
+            <div className="focus-signal">
+              <span>临近提醒</span>
+              <strong>{urgentReminderCount} 个</strong>
+            </div>
+          </div>
+        </article>
+
         <article className="panel links-panel">
-          <PanelTitle icon={<Link size={20} />} title="快捷入口" aside="Launchpad" />
+          <div className="panel-title panel-title-action">
+            <div>
+              <Link size={20} />
+              <h2>快捷入口</h2>
+            </div>
+            <button
+              type="button"
+              className="ghost-action"
+              onClick={() => setAddingQuickLink((current) => !current)}
+            >
+              <Plus size={15} />
+              新入口
+            </button>
+          </div>
           <div className="quick-grid">
             {dashboard.quickLinks.map((item) => (
               <div
@@ -1339,115 +1208,153 @@ function App() {
                   <button
                     type="button"
                     title="编辑入口"
-                    onClick={() =>
-                      setEditingQuickLinkId((current) =>
-                        current === item.id ? null : item.id,
-                      )
-                    }
+                    onClick={() => {
+                      setEditingQuickLinkId((current) => {
+                        const nextId = current === item.id ? null : item.id
+                        setEditingQuickLinkUrl(nextId ? item.url : '')
+                        return nextId
+                      })
+                    }}
                   >
                     <Pencil size={14} />
                   </button>
                 </div>
-                {editingQuickLinkId === item.id && (
-                  <div className="quick-link-edit">
-                    <input
-                      value={item.label}
-                      aria-label={`${item.label} 名称`}
-                      onChange={(event) =>
-                        updateQuickLink(item.id, { label: event.target.value })
-                      }
-                    />
-                    <input
-                      value={item.url}
-                      aria-label={`${item.label} URL`}
-                      onChange={(event) =>
-                        updateQuickLink(item.id, { url: event.target.value })
-                      }
-                    />
-                    <ThemedSelect
-                      compact
-                      value={item.icon}
-                      aria-label={`${item.label} 图标`}
-                      options={linkIconOptions}
-                      onChange={(icon) => updateQuickLink(item.id, { icon })}
-                    />
-                    <button
-                      type="button"
-                      title="删除入口"
-                      onClick={() => removeQuickLink(item.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                )}
               </div>
             ))}
           </div>
-          <div className="link-form">
-            <input
-              value={newLinkLabel}
-              placeholder="名称"
-              onChange={(event) => setNewLinkLabel(event.target.value)}
-            />
-            <input
-              value={newLinkUrl}
-              placeholder="URL"
-              onChange={(event) => setNewLinkUrl(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') addQuickLink()
-              }}
-            />
-            <ThemedSelect
-              compact
-              value={newLinkIcon}
-              aria-label="入口图标"
-              options={linkIconOptions}
-              onChange={setNewLinkIcon}
-            />
-            <button type="button" onClick={addQuickLink}>
-              <Plus size={16} />
-            </button>
-          </div>
-        </article>
-
-        <article className="panel focus-start-panel">
-          <PanelTitle icon={<Focus size={20} />} title="今日专注" aside={`${completionRate}%`} />
-          <div className="focus-priority">
-            <span>现在先做</span>
-            <strong>{suggestedAction}</strong>
-          </div>
-          <FocusControls
-            dashboard={dashboard}
-            activeProject={activeProject}
-            projectOptions={[
-              { value: '', label: '默认第一个项目', icon: <Focus size={15} /> },
-              ...dashboard.projects.map((project) => ({
-                value: project.id,
-                label: project.name,
-                icon: <Flame size={15} />,
-              })),
-            ]}
-            onProjectChange={(projectId) =>
-              updateDashboard((current) => ({
-                ...current,
-                focus: { ...current.focus, projectId },
-              }))
-            }
-            onDurationChange={setFocusDuration}
-            onStart={() => startFocus()}
-            onPause={pauseFocus}
-            onReset={resetFocus}
-          />
-          <div className="focus-signals">
-            <span>{completedTasks}/{dashboard.tasks.length} 完成</span>
-            <span>{totalFocusMinutes} 分钟</span>
-            <span>{urgentReminderCount} 个临近提醒</span>
-            <span>{suggestedProject?.name ?? '未设置项目'}</span>
-          </div>
+          {editingQuickLink && (
+            <div className="quick-link-editor">
+              <div className="quick-link-editor-title">
+                <span>编辑入口</span>
+                <strong>{editingQuickLink.label}</strong>
+              </div>
+              <div className="quick-link-editor-main">
+                <label className="quick-link-editor-field">
+                  <span>名称</span>
+                  <input
+                    value={editingQuickLink.label}
+                    aria-label={`${editingQuickLink.label} 名称`}
+                    onChange={(event) =>
+                      updateQuickLink(editingQuickLink.id, {
+                        label: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label className="quick-link-editor-field quick-link-icon-field">
+                  <span>图标</span>
+                  <ThemedSelect
+                    compact
+                    value={editingQuickLink.icon}
+                    aria-label={`${editingQuickLink.label} 图标`}
+                    options={linkIconOptions}
+                    onChange={(icon) => updateQuickLink(editingQuickLink.id, { icon })}
+                  />
+                </label>
+              </div>
+              <label className="quick-link-editor-field">
+                <span>链接</span>
+                <input
+                  value={editingQuickLinkUrl}
+                  aria-label={`${editingQuickLink.label} URL`}
+                  onChange={(event) => setEditingQuickLinkUrl(event.target.value)}
+                  onBlur={(event) => {
+                    commitQuickLinkUrl(editingQuickLink.id, event.target.value)
+                    setEditingQuickLinkUrl(
+                      normalizeHttpUrl(event.target.value) || editingQuickLink.url,
+                    )
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      commitQuickLinkUrl(editingQuickLink.id, event.currentTarget.value)
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+              </label>
+              <div className="quick-link-editor-actions">
+                <button
+                  type="button"
+                  className="danger-action"
+                  title="删除入口"
+                onClick={() => {
+                  removeQuickLink(editingQuickLink.id)
+                  setEditingQuickLinkId(null)
+                  setEditingQuickLinkUrl('')
+                }}
+                >
+                  <Trash2 size={15} />
+                </button>
+                <button
+                type="button"
+                className="done-action"
+                onClick={() => {
+                  setEditingQuickLinkId(null)
+                  setEditingQuickLinkUrl('')
+                }}
+              >
+                  <Check size={15} />
+                  完成
+                </button>
+              </div>
+            </div>
+          )}
+          {addingQuickLink && (
+            <div className="quick-link-editor link-form">
+              <div className="quick-link-editor-title">
+                <span>新增入口</span>
+                <strong>{newLinkLabel || '常用网站或文档'}</strong>
+              </div>
+              <div className="quick-link-editor-main">
+                <label className="quick-link-editor-field">
+                  <span>名称</span>
+                  <input
+                    value={newLinkLabel}
+                    placeholder="例如 Mail"
+                    onChange={(event) => setNewLinkLabel(event.target.value)}
+                  />
+                </label>
+                <label className="quick-link-editor-field quick-link-icon-field">
+                  <span>图标</span>
+                  <ThemedSelect
+                    compact
+                    value={newLinkIcon}
+                    aria-label="入口图标"
+                    options={linkIconOptions}
+                    onChange={setNewLinkIcon}
+                  />
+                </label>
+              </div>
+              <label className="quick-link-editor-field">
+                <span>链接</span>
+                <input
+                  value={newLinkUrl}
+                  placeholder="https://example.com"
+                  onChange={(event) => setNewLinkUrl(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') addQuickLink()
+                  }}
+                />
+              </label>
+              <div className="quick-link-editor-actions">
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => setAddingQuickLink(false)}
+                >
+                  取消
+                </button>
+                <button type="button" className="done-action" onClick={addQuickLink}>
+                  <Plus size={16} />
+                  添加
+                </button>
+              </div>
+            </div>
+          )}
         </article>
       </section>
 
-      <section className="routine-grid" aria-label="个人作战桌面">
+      <section className="execution-grid" aria-label="个人作战桌面">
         <article className="panel today-panel">
           <PanelTitle
             icon={<SquareCheckBig size={20} />}
@@ -1468,130 +1375,264 @@ function App() {
             <small>{topTasks.length}/3</small>
           </div>
           <ul className="task-list top-task-list">
-            {topTasks.map((task) => (
+            {topTasks.map((task, index) => (
               <TaskRow
                 key={task.id}
                 task={task}
+                orderMoveDirection={
+                  movedOrderItem?.id === task.id ? movedOrderItem.direction : undefined
+                }
                 onToggle={() => toggleTask(task.id)}
                 onRemove={() => removeTask(task.id)}
+                onMoveUp={() => moveTaskWithinKind(task.id, 'up')}
+                onMoveDown={() => moveTaskWithinKind(task.id, 'down')}
+                canMoveUp={index > 0}
+                canMoveDown={index < topTasks.length - 1}
               />
             ))}
           </ul>
-          <div className="inline-form">
-            <input
-              value={newTopTask}
-              maxLength={60}
-              disabled={topTasks.length >= 3}
-              placeholder={topTasks.length >= 3 ? 'Top 3 已满' : '添加今天最重要的事'}
-              onChange={(event) => setNewTopTask(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') addTask('top')
-              }}
-            />
+          {addingTopTask ? (
+            <div className="inline-form">
+              <input
+                value={newTopTask}
+                maxLength={60}
+                disabled={topTasks.length >= 3}
+                placeholder={topTasks.length >= 3 ? 'Top 3 已满' : '添加今天最重要的事'}
+                onChange={(event) => setNewTopTask(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') addTask('top')
+                }}
+              />
+              <button
+                type="button"
+                disabled={topTasks.length >= 3}
+                title="添加 Top 3"
+                onClick={() => addTask('top')}
+              >
+                <Plus size={17} />
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
+              className="add-row-button"
               disabled={topTasks.length >= 3}
-              title="添加 Top 3"
-              onClick={() => addTask('top')}
+              onClick={() => setAddingTopTask(true)}
             >
-              <Plus size={17} />
+              <Plus size={15} />
+              {topTasks.length >= 3 ? 'Top 3 已满' : '添加最重要的事'}
             </button>
-          </div>
+          )}
 
           <div className="section-heading">
             <span>普通待办</span>
             <small>{todos.filter((todo) => todo.done).length}/{todos.length}</small>
           </div>
           <ul className="task-list">
-            {todos.map((task) => (
+            {todos.map((task, index) => (
               <TaskRow
                 key={task.id}
                 task={task}
+                orderMoveDirection={
+                  movedOrderItem?.id === task.id ? movedOrderItem.direction : undefined
+                }
                 onToggle={() => toggleTask(task.id)}
                 onRemove={() => removeTask(task.id)}
+                onMoveUp={() => moveTaskWithinKind(task.id, 'up')}
+                onMoveDown={() => moveTaskWithinKind(task.id, 'down')}
+                canMoveUp={index > 0}
+                canMoveDown={index < todos.length - 1}
               />
             ))}
           </ul>
-          <div className="inline-form">
-            <input
-              value={newTodo}
-              maxLength={80}
-              placeholder="添加一个次要任务"
-              onChange={(event) => setNewTodo(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') addTask('todo')
-              }}
-            />
-            <button type="button" title="添加待办" onClick={() => addTask('todo')}>
-              <Plus size={17} />
+          {addingTodo ? (
+            <div className="inline-form">
+              <input
+                value={newTodo}
+                maxLength={80}
+                placeholder="添加一个次要任务"
+                onChange={(event) => setNewTodo(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') addTask('todo')
+                }}
+              />
+              <button type="button" title="添加待办" onClick={() => addTask('todo')}>
+                <Plus size={17} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="add-row-button subtle"
+              onClick={() => setAddingTodo(true)}
+            >
+              <Plus size={15} />
+              添加普通待办
             </button>
-          </div>
+          )}
         </article>
 
         <article className="panel project-panel">
-          <PanelTitle icon={<Flame size={20} />} title="项目推进" aside="Next Action" />
-          <div className="project-stack">
-            {dashboard.projects.map((project) => (
-              <div className="project-card" key={project.id}>
-                <div className="project-card-header">
-                  <input
-                    value={project.name}
-                    aria-label="项目名称"
-                    onChange={(event) =>
-                      updateProject(project.id, { name: event.target.value })
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="icon-button danger"
-                    title="删除项目"
-                    onClick={() => removeProject(project.id)}
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-                <textarea
-                  value={project.nextAction}
-                  aria-label={`${project.name} 的下一步动作`}
-                  onChange={(event) =>
-                    updateProject(project.id, { nextAction: event.target.value })
-                  }
-                />
-                <div className="project-meta">
-                  <span>{project.minutes} 分钟已记录</span>
-                  <button
-                    type="button"
-                    onClick={() => startFocus(project.id, project.nextAction)}
-                  >
-                    <Play size={14} />
-                    专注
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="project-form">
-            <input
-              value={newProjectName}
-              placeholder="新项目"
-              onChange={(event) => setNewProjectName(event.target.value)}
-            />
-            <input
-              value={newProjectAction}
-              placeholder="下一步动作"
-              onChange={(event) => setNewProjectAction(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') addProject()
-              }}
-            />
-            <button type="button" onClick={addProject}>
-              <Plus size={16} />
-              添加
+          <div className="panel-title panel-title-action">
+            <div>
+              <Flame size={20} />
+              <h2>项目推进</h2>
+            </div>
+            <button
+              type="button"
+              className="ghost-action"
+              onClick={() => setAddingProject((current) => !current)}
+            >
+              <Plus size={15} />
+              新项目
             </button>
           </div>
+          <div className="project-stack">
+            {dashboard.projects.map((project, index) => {
+              const isEditing = editingProjectId === project.id
+              const canMoveUp = index > 0
+              const canMoveDown = index < dashboard.projects.length - 1
+              const orderMoveDirection =
+                movedOrderItem?.id === project.id ? movedOrderItem.direction : undefined
+              return (
+                <div
+                  className={[
+                    'project-card',
+                    isEditing ? 'editing' : '',
+                    orderMoveDirection ? `order-moved move-${orderMoveDirection}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  key={project.id}
+                >
+                  {isEditing ? (
+                    <>
+                      <div className="project-card-header">
+                        <input
+                          value={project.name}
+                          aria-label="项目名称"
+                          onChange={(event) =>
+                            updateProject(project.id, { name: event.target.value })
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="icon-button danger"
+                          title="删除项目"
+                          onClick={() => removeProject(project.id)}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                      <textarea
+                        value={project.nextAction}
+                        aria-label={`${project.name} 的下一步动作`}
+                        onChange={(event) =>
+                          updateProject(project.id, { nextAction: event.target.value })
+                        }
+                      />
+                      <div className="project-meta">
+                        <span>{project.minutes} 分钟已记录</span>
+                        <div className="project-actions project-actions-editing">
+                          <OrderControls
+                            canMoveUp={canMoveUp}
+                            canMoveDown={canMoveDown}
+                            onMoveUp={() => moveProject(project.id, 'up')}
+                            onMoveDown={() => moveProject(project.id, 'down')}
+                          />
+                          <button type="button" onClick={() => setEditingProjectId(null)}>
+                            <Check size={14} />
+                            完成
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="project-readout">
+                        <span>下一步</span>
+                        <h3>{project.name}</h3>
+                        <p>{project.nextAction}</p>
+                      </div>
+                      <div className="project-meta">
+                        <span>{project.minutes} 分钟已记录</span>
+                        <div className="project-actions">
+                          <div className="quiet-actions" aria-label="项目管理">
+                            <OrderControls
+                              canMoveUp={canMoveUp}
+                              canMoveDown={canMoveDown}
+                              onMoveUp={() => moveProject(project.id, 'up')}
+                              onMoveDown={() => moveProject(project.id, 'down')}
+                            />
+                            <button
+                              type="button"
+                              className="secondary-action compact-action"
+                              title="编辑项目"
+                              aria-label={`编辑 ${project.name}`}
+                              onClick={() => setEditingProjectId(project.id)}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            className="primary-action project-focus-action"
+                            onClick={() => startFocus(project.id, project.nextAction)}
+                          >
+                            <Play size={14} />
+                            专注
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {addingProject && (
+            <div className="field-form project-form">
+              <div className="quick-link-editor-title">
+                <span>新增项目</span>
+                <strong>{newProjectName || '把长期目标变成下一步动作'}</strong>
+              </div>
+              <label className="quick-link-editor-field">
+                <span>项目名称</span>
+                <input
+                  value={newProjectName}
+                  placeholder="例如 个人网站"
+                  onChange={(event) => setNewProjectName(event.target.value)}
+                />
+              </label>
+              <label className="quick-link-editor-field">
+                <span>下一步动作</span>
+                <input
+                  value={newProjectAction}
+                  placeholder="例如 写 About 页面初稿"
+                  onChange={(event) => setNewProjectAction(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') addProject()
+                  }}
+                />
+              </label>
+              <div className="quick-link-editor-actions">
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => setAddingProject(false)}
+                >
+                  取消
+                </button>
+                <button type="button" className="done-action" onClick={addProject}>
+                  <Plus size={16} />
+                  添加
+                </button>
+              </div>
+            </div>
+          )}
         </article>
 
-        <aside className="routine-side">
+        <aside className="execution-side">
           <article className="panel inbox-panel">
             <PanelTitle icon={<Inbox size={20} />} title="灵感暂存箱" aside={`${dashboard.inbox.length} 条`} />
             <div className="brain-dump">
@@ -1629,11 +1670,20 @@ function App() {
           </article>
 
           <article className="panel reminders-panel">
-            <PanelTitle
-              icon={<CalendarClock size={20} />}
-              title="提醒与倒计时"
-              aside={nextReminder ? `${daysUntil(nextReminder.date)} 天` : '别忘'}
-            />
+            <div className="panel-title panel-title-action">
+              <div>
+                <CalendarClock size={20} />
+                <h2>提醒与倒计时</h2>
+              </div>
+              <button
+                type="button"
+                className="ghost-action"
+                onClick={() => setAddingReminder((current) => !current)}
+              >
+                <Plus size={15} />
+                新提醒
+              </button>
+            </div>
             <div className="reminder-stack">
               {dashboard.reminders
                 .slice()
@@ -1662,36 +1712,181 @@ function App() {
                   )
                 })}
             </div>
-            <div className="reminder-form">
-              <input
-                value={newReminderTitle}
-                placeholder="提醒名称"
-                onChange={(event) => setNewReminderTitle(event.target.value)}
-              />
-              <input
-                type="date"
-                value={newReminderDate}
-                onChange={(event) => setNewReminderDate(event.target.value)}
-              />
-              <input
-                value={newReminderType}
-                placeholder="类型"
-                onChange={(event) => setNewReminderType(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') addReminder()
-                }}
-              />
-              <button type="button" onClick={addReminder}>
-                <Plus size={16} />
-              </button>
-            </div>
+            {addingReminder && (
+              <div className="field-form reminder-form">
+                <div className="quick-link-editor-title">
+                  <span>新增提醒</span>
+                  <strong>{newReminderTitle || '重要日期和倒计时'}</strong>
+                </div>
+                <label className="quick-link-editor-field reminder-title-field">
+                  <span>提醒名称</span>
+                  <input
+                    value={newReminderTitle}
+                    placeholder="例如 信用卡账单"
+                    onChange={(event) => setNewReminderTitle(event.target.value)}
+                  />
+                </label>
+                <div className="reminder-form-row">
+                  <label className="quick-link-editor-field">
+                    <span>日期</span>
+                    <input
+                      type="date"
+                      value={newReminderDate}
+                      onChange={(event) => setNewReminderDate(event.target.value)}
+                    />
+                  </label>
+                  <label className="quick-link-editor-field">
+                    <span>类型</span>
+                    <input
+                      value={newReminderType}
+                      placeholder="Deadline"
+                      onChange={(event) => setNewReminderType(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') addReminder()
+                      }}
+                    />
+                  </label>
+                </div>
+                <div className="quick-link-editor-actions">
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => setAddingReminder(false)}
+                  >
+                    取消
+                  </button>
+                  <button type="button" className="done-action" onClick={addReminder}>
+                    <Plus size={16} />
+                    添加
+                  </button>
+                </div>
+              </div>
+            )}
           </article>
         </aside>
       </section>
 
-      <section className="routine-review" aria-label="AI 每日总结">
+      <section className="execution-review" aria-label="AI 每日总结">
         <article className="panel ai-review-panel">
-          <PanelTitle icon={<Moon size={20} />} title="轻量每日复盘" aside={todayIso()} />
+          <div className="panel-title panel-title-action">
+            <div>
+              <Moon size={20} />
+              <h2>收工复盘</h2>
+            </div>
+            <div className="review-actions">
+              <span>{todayIso()}</span>
+              <button
+                type="button"
+                className={dashboard.ai.enabled ? 'api-active' : ''}
+                onClick={() => setAiSettingsOpen((current) => !current)}
+              >
+                <Cpu size={15} />
+                {dashboard.ai.enabled ? 'API 已接入' : '接入 API'}
+              </button>
+              <button
+                type="button"
+                disabled={aiLoading}
+                onClick={() => void generateReviewSummary()}
+              >
+                <Sparkles size={15} />
+                {aiLoading ? '生成中...' : '生成总结'}
+              </button>
+              <button type="button" onClick={archiveToday}>
+                <Archive size={15} />
+                归档今天
+              </button>
+            </div>
+          </div>
+          {aiSettingsOpen && (
+            <div className="ai-settings-panel">
+              <div className="ai-settings-head">
+                <div>
+                  <span>AI API</span>
+                  <strong>
+                    {dashboard.ai.enabled
+                      ? `${dashboard.ai.provider} · ${dashboard.ai.model || '未选模型'}`
+                      : '默认使用本地总结'}
+                  </strong>
+                </div>
+                <label className="ai-toggle">
+                  <input
+                    type="checkbox"
+                    checked={dashboard.ai.enabled}
+                    onChange={(event) =>
+                      updateAiSettings({ enabled: event.target.checked })
+                    }
+                  />
+                  <span>{dashboard.ai.enabled ? '已启用' : '未启用'}</span>
+                </label>
+              </div>
+              <div className="ai-settings-grid">
+                <label className="quick-link-editor-field">
+                  <span>提供商</span>
+                  <ThemedSelect
+                    compact
+                    value={dashboard.ai.provider}
+                    aria-label="AI 提供商"
+                    options={aiProviderOptions}
+                    onChange={(provider) => setAiProvider(provider as AiProvider)}
+                  />
+                </label>
+                <label className="quick-link-editor-field">
+                  <span>API Key</span>
+                  <input
+                    type="password"
+                    value={dashboard.ai.apiKey}
+                    placeholder="只保存在本机 localStorage"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      updateAiSettings({ apiKey: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="quick-link-editor-field ai-base-field">
+                  <span>API 地址</span>
+                  <input
+                    value={dashboard.ai.baseUrl}
+                    placeholder="https://api.openai.com/v1"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      updateAiSettings({ baseUrl: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="quick-link-editor-field">
+                  <span>模型</span>
+                  <input
+                    value={dashboard.ai.model}
+                    placeholder="gpt-4.1-mini"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      updateAiSettings({ model: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="ai-settings-note">
+                <span>提示词会自动读取今日任务、项目、暂存、提醒和复盘输入。</span>
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => setAiSettingsOpen(false)}
+                >
+                  完成
+                </button>
+              </div>
+              {dashboard.ai.enabled && aiSettingsIssue && (
+                <p className="ai-error">{aiSettingsIssue}</p>
+              )}
+              {aiError && <p className="ai-error">{aiError}</p>}
+            </div>
+          )}
           <div className="review-grid">
             <label>
               今天做了什么？
@@ -1718,20 +1913,43 @@ function App() {
               />
             </label>
           </div>
-          <div className="ai-placeholder">
-            <Sparkles size={17} />
-            <span>AI 晚间总结接口已预留：未来可用今日任务、暂存箱和复盘生成作战报告。</span>
+          <div className="review-summary">
+            <div>
+              <Sparkles size={17} />
+              <span>{summaryModeLabel}</span>
+            </div>
+            <pre>
+              {dashboard.reviewSummary ||
+                '点“生成总结”后，会根据今天完成项、项目、暂存、提醒和复盘输入生成一段轻量复盘。'}
+            </pre>
+          </div>
+          <div className="archive-strip">
+            <span>
+              {latestArchive
+                ? `最近归档：${latestArchive.date} · ${latestArchive.completedTasks.length} 项完成`
+                : '还没有归档记录'}
+            </span>
+            {dataNotice && <strong>{dataNotice}</strong>}
           </div>
         </article>
       </section>
 
       {commandOpen && (
-        <div className="command-overlay" role="dialog" aria-modal="true">
-          <div className="command-panel">
+        <div
+          className="command-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={() => setCommandOpen(false)}
+        >
+          <div className="command-panel" onMouseDown={(event) => event.stopPropagation()}>
             <div className="command-search">
               <Search size={19} />
               <input
                 autoFocus
+                aria-label="搜索命令"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={commandQuery}
                 placeholder="搜索链接、任务、项目、灵感..."
                 onChange={(event) => setCommandQuery(event.target.value)}
@@ -1739,10 +1957,11 @@ function App() {
               <button
                 className="icon-button"
                 type="button"
+                aria-label="关闭命令面板"
                 title="关闭命令面板"
                 onClick={() => setCommandOpen(false)}
               >
-                <MoreHorizontal size={18} />
+                <X size={18} />
               </button>
             </div>
             <div className="command-results">
@@ -1767,8 +1986,13 @@ function App() {
       )}
 
       {quoteManagerOpen && (
-        <div className="command-overlay" role="dialog" aria-modal="true">
-          <div className="quote-panel">
+        <div
+          className="command-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={() => setQuoteManagerOpen(false)}
+        >
+          <div className="quote-panel" onMouseDown={(event) => event.stopPropagation()}>
             <div className="quote-manager-header">
               <div>
                 <Sparkles size={20} />
@@ -1882,219 +2106,6 @@ function App() {
       )}
     </main>
   )
-}
-
-function PanelTitle({
-  icon,
-  title,
-  aside,
-}: {
-  icon: React.ReactNode
-  title: string
-  aside?: string
-}) {
-  return (
-    <div className="panel-title">
-      <div>
-        {icon}
-        <h2>{title}</h2>
-      </div>
-      {aside && <span>{aside}</span>}
-    </div>
-  )
-}
-
-function TaskRow({
-  task,
-  onToggle,
-  onRemove,
-}: {
-  task: Task
-  onToggle: () => void
-  onRemove: () => void
-}) {
-  return (
-    <li className={task.done ? 'task-row done' : 'task-row'}>
-      <button type="button" className="check-button" onClick={onToggle}>
-        {task.done ? <Check size={15} /> : <Circle size={15} />}
-      </button>
-      <span>{task.title}</span>
-      <button
-        type="button"
-        className="icon-button danger"
-        title="删除任务"
-        onClick={onRemove}
-      >
-        <Trash2 size={15} />
-      </button>
-    </li>
-  )
-}
-
-function FocusControls({
-  dashboard,
-  activeProject,
-  projectOptions,
-  onProjectChange,
-  onDurationChange,
-  onStart,
-  onPause,
-  onReset,
-}: {
-  dashboard: DashboardState
-  activeProject?: Project
-  projectOptions: SelectOption[]
-  onProjectChange: (projectId: string) => void
-  onDurationChange: (durationMinutes: number) => void
-  onStart: () => void
-  onPause: () => void
-  onReset: () => void
-}) {
-  return (
-    <div className="focus-console">
-      <div className="timer-readout">
-        <TimerReset size={18} />
-        <strong>{formatMinutes(dashboard.focus.secondsLeft)}</strong>
-        <span>{activeProject?.name ?? '选择项目'}</span>
-      </div>
-      <div className="focus-controls">
-        <ThemedSelect
-          value={dashboard.focus.projectId}
-          aria-label="选择专注项目"
-          options={projectOptions}
-          onChange={onProjectChange}
-        />
-        <input
-          type="number"
-          min={5}
-          max={120}
-          value={dashboard.focus.durationMinutes}
-          aria-label="专注分钟数"
-          onChange={(event) => onDurationChange(Number(event.target.value) || 25)}
-        />
-        {dashboard.focus.running ? (
-          <button type="button" className="primary-action" onClick={onPause}>
-            <Pause size={16} />
-            暂停
-          </button>
-        ) : (
-          <button type="button" className="primary-action" onClick={onStart}>
-            <Play size={16} />
-            开始专注
-          </button>
-        )}
-        <button type="button" className="secondary-action" onClick={onReset}>
-          <RotateCcw size={16} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function ThemedSelect({
-  value,
-  options,
-  onChange,
-  label,
-  icon,
-  className = '',
-  compact = false,
-  'aria-label': ariaLabel,
-}: {
-  value: string
-  options: SelectOption[]
-  onChange: (value: string) => void
-  label?: string
-  icon?: React.ReactNode
-  className?: string
-  compact?: boolean
-  'aria-label'?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const selected = options.find((option) => option.value === value) ?? options[0]
-
-  useEffect(() => {
-    if (!open) return
-    const handleClick = () => setOpen(false)
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-
-    window.addEventListener('click', handleClick)
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('click', handleClick)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [open])
-
-  return (
-    <div
-      className={[
-        'themed-select',
-        compact ? 'compact' : '',
-        open ? 'open' : '',
-        className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      onClick={(event) => event.stopPropagation()}
-    >
-      {label && (
-        <span className="themed-select-label">
-          {icon}
-          {label}
-        </span>
-      )}
-      <button
-        type="button"
-        className="themed-select-trigger"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel ?? label}
-        onClick={() => setOpen((current) => !current)}
-      >
-        {selected?.icon}
-        <span>{selected?.label ?? value}</span>
-        <ChevronDown size={15} />
-      </button>
-      {open && (
-        <div className="themed-select-menu" role="listbox">
-          {options.map((option) => (
-            <button
-              type="button"
-              key={option.value}
-              className={option.value === value ? 'selected' : ''}
-              role="option"
-              aria-selected={option.value === value}
-              onClick={() => {
-                onChange(option.value)
-                setOpen(false)
-              }}
-            >
-              {option.icon}
-              <span>{option.label}</span>
-              {option.value === value && <Check size={14} />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function IconByName({ name }: { name: string }) {
-  const props = { size: 20 }
-  if (name === 'github') return <Globe2 {...props} />
-  if (name === 'sparkles') return <Sparkles {...props} />
-  if (name === 'zap') return <Zap {...props} />
-  if (name === 'mail') return <Mail {...props} />
-  if (name === 'calendar') return <CalendarClock {...props} />
-  if (name === 'doc') return <Pencil {...props} />
-  if (name === 'sun') return <Sun {...props} />
-  if (name === 'star') return <Star {...props} />
-  if (name === 'globe') return <Globe2 {...props} />
-  return <Link {...props} />
 }
 
 export default App
