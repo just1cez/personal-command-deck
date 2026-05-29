@@ -1,10 +1,149 @@
-const { app, BrowserWindow, ipcMain, session, shell } = require('electron')
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  dialog,
+  ipcMain,
+  nativeImage,
+  session,
+  shell,
+} = require('electron')
+const fs = require('node:fs')
 const path = require('node:path')
 
 const isDev = process.env.VITE_DEV_SERVER_URL
+const appIconPath = path.join(__dirname, 'assets', 'app.ico')
+const trayIconPath = path.join(__dirname, 'assets', 'tray.png')
+
+let mainWindow = null
+let tray = null
+let isQuitting = false
+let closeDialogOpen = false
+
+const defaultSettings = {
+  closeBehavior: 'ask',
+}
+
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json')
+}
+
+function readSettings() {
+  try {
+    const settings = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'))
+    if (['ask', 'tray', 'quit'].includes(settings.closeBehavior)) {
+      return { ...defaultSettings, ...settings }
+    }
+  } catch {
+    // Fall back to asking when the file is missing or malformed.
+  }
+  return defaultSettings
+}
+
+function writeSettings(settings) {
+  fs.mkdirSync(app.getPath('userData'), { recursive: true })
+  fs.writeFileSync(
+    getSettingsPath(),
+    JSON.stringify({ ...defaultSettings, ...settings }, null, 2),
+  )
+}
+
+function showMainWindow() {
+  if (!mainWindow) {
+    createWindow()
+    return
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function hideMainWindow() {
+  if (mainWindow) mainWindow.hide()
+}
+
+function quitApp() {
+  isQuitting = true
+  app.quit()
+}
+
+function createTray() {
+  if (tray) return tray
+
+  const trayIcon = nativeImage.createFromPath(trayIconPath)
+  tray = new Tray(trayIcon)
+  tray.setToolTip('Personal Command Deck')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: '打开 Personal Command Deck',
+        click: showMainWindow,
+      },
+      {
+        label: '隐藏窗口',
+        click: hideMainWindow,
+      },
+      { type: 'separator' },
+      {
+        label: '退出',
+        click: quitApp,
+      },
+    ]),
+  )
+  tray.on('click', showMainWindow)
+  tray.on('double-click', showMainWindow)
+
+  return tray
+}
+
+async function handleWindowClose(event) {
+  if (isQuitting) return
+  event.preventDefault()
+
+  const settings = readSettings()
+  if (settings.closeBehavior === 'tray') {
+    hideMainWindow()
+    return
+  }
+  if (settings.closeBehavior === 'quit') {
+    quitApp()
+    return
+  }
+  if (closeDialogOpen) return
+
+  closeDialogOpen = true
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: '关闭 Personal Command Deck',
+    message: '要把 Personal Command Deck 最小化到系统托盘吗？',
+    detail: '最小化到托盘后，应用会继续运行。你可以从托盘菜单重新打开，或选择退出。',
+    buttons: ['最小化到托盘', '直接退出', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    checkboxLabel: '记住我的选择',
+    checkboxChecked: false,
+    noLink: true,
+  })
+  closeDialogOpen = false
+
+  if (result.checkboxChecked && result.response === 0) {
+    writeSettings({ closeBehavior: 'tray' })
+  }
+  if (result.checkboxChecked && result.response === 1) {
+    writeSettings({ closeBehavior: 'quit' })
+  }
+
+  if (result.response === 0) {
+    hideMainWindow()
+  } else if (result.response === 1) {
+    quitApp()
+  }
+}
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1380,
     height: 920,
     minWidth: 1024,
@@ -12,11 +151,20 @@ function createWindow() {
     title: 'Personal Command Deck',
     backgroundColor: '#0f1418',
     autoHideMenuBar: true,
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  mainWindow.on('close', (event) => {
+    void handleWindowClose(event)
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -79,12 +227,17 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  createTray()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    showMainWindow()
   })
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (isQuitting && process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  isQuitting = true
 })

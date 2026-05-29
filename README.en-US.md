@@ -97,3 +97,7 @@ npm run dist:desktop
 ```
 
 Generated build output goes to `dist/` and `release/`. These folders are intentionally ignored by Git.
+
+## License
+
+Personal Command Deck is released under the [MIT License](LICENSE).

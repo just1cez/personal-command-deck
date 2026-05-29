@@ -97,3 +97,7 @@ npm run dist:desktop
 ```
 
 构建产物会生成到 `dist/` 和 `release/`，这两个目录已被 Git 忽略。
+
+## 协议
+
+Personal Command Deck 使用 [MIT License](LICENSE) 发布。
