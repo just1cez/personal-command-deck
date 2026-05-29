@@ -1,31 +1,56 @@
 # Personal Command Deck
 
-A local-first personal execution desktop built with React, Vite, TypeScript, and Electron.
+Personal Command Deck is a local-first desktop app for people who want one calm place to start the day, choose what matters, stay focused, and close the day with a short review.
 
-Personal Command Deck is designed as a small daily command center: open it, see what matters now, start focus, collect loose ideas, track upcoming dates, and close the day with a lightweight review.
+It is not a team dashboard, calendar replacement, or heavy productivity system. It is a personal execution desk: open it, see the next useful action, and get moving.
 
-## Features
+## What You See When You Open It
 
-- Today focus: one clear current target, focus timer, completion rate, focus minutes, and nearby reminders.
-- Top 3 and todos: separate priority tasks from normal tasks, with manual ordering.
-- Project progress: each project shows the next action instead of a long-term goal.
-- Quick launcher: custom links for tools, documents, mail, calendar, GitHub, AI tools, and more.
-- Weather: local or city-based weather lookup through public weather APIs.
-- Daily quote pool: local quote management with one fixed quote per day.
-- Inbox: a fast scratchpad for ideas before organizing them.
-- Reminders and countdowns: bills, deadlines, birthdays, interviews, and other dates.
-- Daily review: local summary by default, with optional AI API integration.
-- Local backup: export and import dashboard data as JSON.
+- Today's focus: the current target, focus timer, completion rate, focus minutes, and nearby reminders.
+- Top 3 tasks: the three things that matter most today.
+- Normal todos: smaller tasks that should not compete with the Top 3.
+- Project next actions: projects are shown as the next concrete step, not vague long-term goals.
+- Quick links: your common tools, documents, email, calendar, GitHub, AI tools, and custom links.
+- Inbox: a place to drop loose thoughts before organizing them.
+- Reminders and countdowns: bills, deadlines, birthdays, interviews, trips, and other dates.
+- End-of-day review: what moved, what got stuck, and tomorrow's first step.
 
-## Local First
+## Main Features
 
-The app stores dashboard data in browser localStorage inside the desktop/web runtime. It does not require an account or hosted backend.
+- Local dashboard data, no account required.
+- Focus timer with project-level time tracking.
+- Manual ordering for priority tasks and projects.
+- Daily quote with a local quote pool.
+- Weather lookup by location or city.
+- JSON backup import and export.
+- Optional AI-generated daily review.
+- Windows desktop installer with selectable install location.
 
-API keys for optional AI summaries are also stored locally. This is convenient for a personal local app, but it is not an encrypted secret vault.
+## Install
 
-## AI Summary
+Download the Windows installer from GitHub Releases when a release is available:
 
-The review panel can optionally call an OpenAI-compatible chat completions API.
+[Releases](https://github.com/just1cez/personal-command-deck/releases)
+
+Run the installer and choose the installation folder when prompted.
+
+If there is no release yet, this repository currently provides the source code. A developer can build the installer locally.
+
+## Daily Use
+
+1. Open the app.
+2. Check the "Today Focus" area first.
+3. Start a focus session from the main focus card or a project card.
+4. Put unfinished thoughts into the inbox instead of interrupting the current task.
+5. Check reminders when planning your day.
+6. At the end of the day, fill in the review fields and generate a short summary.
+7. Export a backup occasionally if you care about preserving local data.
+
+## AI Review
+
+AI review is optional. The app works without it.
+
+If enabled, you can choose an OpenAI-compatible provider, API URL, API key, and model. The app automatically builds the prompt from your current tasks, projects, inbox items, reminders, focus time, and review notes.
 
 Supported presets include:
 
@@ -34,9 +59,18 @@ Supported presets include:
 - Moonshot
 - Custom OpenAI-compatible endpoint
 
-When enabled, the app automatically builds a prompt from the current dashboard state, including tasks, projects, inbox items, reminders, focus minutes, and review inputs. When disabled, it falls back to a local summary.
+API keys are stored locally in the app runtime. This is convenient for personal use, but it is not an encrypted password manager.
 
-## Development
+## Data and Privacy
+
+- Your dashboard data is stored locally in localStorage.
+- The app does not require login.
+- The app does not use a hosted backend.
+- Weather lookup calls public weather/location APIs when you use weather features.
+- AI review sends the generated review prompt to your configured AI provider only when AI is enabled and you generate a summary.
+- You can export and import local JSON backups from inside the app.
+
+## For Developers
 
 Install dependencies:
 
@@ -44,55 +78,22 @@ Install dependencies:
 npm install
 ```
 
-Run the web app:
+Run locally:
 
 ```bash
 npm run dev
 ```
 
-Run the Electron desktop app in development:
+Run the desktop app in development:
 
 ```bash
 npm run dev:desktop
 ```
 
-Lint:
-
-```bash
-npm run lint
-```
-
-Build the web assets:
-
-```bash
-npm run build
-```
-
-Build the Windows desktop installer:
+Build the Windows installer:
 
 ```bash
 npm run dist:desktop
 ```
 
-The installer and unpacked desktop app are generated under `release/`. That folder is intentionally ignored by Git.
-
-## Repository Hygiene
-
-The repository tracks source code and project configuration only. It does not commit:
-
-- `node_modules/`
-- `dist/`
-- `release/`
-- local API keys
-- local dashboard data
-
-If you want to distribute an installer, upload the generated `.exe` through GitHub Releases instead of committing it to the repository.
-
-## Tech Stack
-
-- React
-- TypeScript
-- Vite
-- Electron
-- electron-builder
-- lucide-react
+Generated build output goes to `dist/` and `release/`. These folders are intentionally ignored by Git.
