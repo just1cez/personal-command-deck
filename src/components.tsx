@@ -6,12 +6,12 @@ import {
   Check,
   ChevronDown,
   Circle,
+  FileText,
   Globe2,
   Link,
   Mail,
   Minus,
   Pause,
-  Pencil,
   Play,
   Plus,
   RotateCcw,
@@ -195,6 +195,7 @@ export function FocusControls({
         )}
         <button type="button" className="secondary-action" onClick={onReset}>
           <RotateCcw size={16} />
+          重置
         </button>
       </div>
     </div>
@@ -300,7 +301,7 @@ export function IconByName({ name }: { name: string }) {
   if (name === 'zap') return <Zap {...props} />
   if (name === 'mail') return <Mail {...props} />
   if (name === 'calendar') return <CalendarClock {...props} />
-  if (name === 'doc') return <Pencil {...props} />
+  if (name === 'doc') return <FileText {...props} />
   if (name === 'sun') return <Sun {...props} />
   if (name === 'star') return <Star {...props} />
   if (name === 'globe') return <Globe2 {...props} />

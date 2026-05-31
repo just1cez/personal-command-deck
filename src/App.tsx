@@ -15,6 +15,7 @@ import {
   Inbox,
   Link,
   MapPin,
+  Minus,
   Moon,
   Palette,
   Pencil,
@@ -53,13 +54,13 @@ import type {
 import {
   aiProviderDefaults,
   aiProviderOptions,
-  defaultState,
+  createBackupState,
   dayModeOptions,
   fallbackQuote,
   getQuoteById,
   linkIconOptions,
   loadState,
-  normalizeQuotes,
+  normalizeDashboardState,
   pickQuoteId,
   resolveDailyQuote,
   STORAGE_KEY,
@@ -91,8 +92,175 @@ import {
 import { WeatherIcon } from './weatherIcon'
 import './App.css'
 
+const STORAGE_FAILURE_NOTICE = '本地存储写入失败，请先导出备份后再清理数据'
+const INVALID_LINK_NOTICE = '链接无效：只支持 http/https 地址'
+const MAIN_VIEW_STORAGE_KEY = 'personal-command-deck-main-view'
+
+type MainView = 'start' | 'execute' | 'review'
+
+const isMainView = (value: string | null): value is MainView =>
+  value === 'start' || value === 'execute' || value === 'review'
+
+const loadMainView = (): MainView => {
+  try {
+    const storedView = window.localStorage.getItem(MAIN_VIEW_STORAGE_KEY)
+    return isMainView(storedView) ? storedView : 'start'
+  } catch {
+    return 'start'
+  }
+}
+
+const mainViewOptions = [
+  { value: 'start', label: '聚焦', hint: '本轮目标', icon: <Focus size={17} /> },
+  { value: 'execute', label: '推进', hint: '任务项目', icon: <SquareCheckBig size={17} /> },
+  { value: 'review', label: '复盘', hint: '总结归档', icon: <Moon size={17} /> },
+] satisfies Array<{
+  value: MainView
+  label: string
+  hint: string
+  icon: React.ReactNode
+}>
+
+const reminderTypeOptions = [
+  { value: 'Deadline', label: 'Deadline', icon: <CalendarClock size={15} /> },
+  { value: '账单', label: '账单', icon: <SquareCheckBig size={15} /> },
+  { value: '生日', label: '生日', icon: <Sparkles size={15} /> },
+  { value: '面试', label: '面试', icon: <Brain size={15} /> },
+  { value: '旅行', label: '旅行', icon: <MapPin size={15} /> },
+  { value: '其他', label: '其他', icon: <Link size={15} /> },
+]
+
+const recognizableStateKeys = new Set([
+  'theme',
+  'dayMode',
+  'energy',
+  'weather',
+  'currentFocus',
+  'tasks',
+  'projects',
+  'quickLinks',
+  'inbox',
+  'reminders',
+  'review',
+  'reviewSummary',
+  'ai',
+  'archives',
+  'focus',
+])
+
+const isJsonRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const extractBackupState = (parsed: unknown): StoredDashboardState => {
+  if (!isJsonRecord(parsed)) {
+    throw new Error('备份文件不是可识别的 JSON 对象')
+  }
+
+  if ('state' in parsed) {
+    if (parsed.app !== 'Personal Command Deck') {
+      throw new Error('这不是 Personal Command Deck 的备份')
+    }
+    if (!isJsonRecord(parsed.state)) {
+      throw new Error('备份里没有可导入的数据')
+    }
+    return parsed.state as StoredDashboardState
+  }
+
+  const looksLikeLegacyState = Object.keys(parsed).some((key) =>
+    recognizableStateKeys.has(key),
+  )
+  if (!looksLikeLegacyState) {
+    throw new Error('没有找到 Personal Command Deck 数据')
+  }
+  return parsed as StoredDashboardState
+}
+
+const createFocusEndTime = (secondsLeft: number) =>
+  new Date(Date.now() + Math.max(0, secondsLeft) * 1000).toISOString()
+
+const getFocusSecondsLeft = (endsAt?: string) => {
+  if (!endsAt) return 0
+  const endTime = new Date(endsAt).getTime()
+  if (!Number.isFinite(endTime)) return 0
+  return Math.max(0, Math.ceil((endTime - Date.now()) / 1000))
+}
+
+const getFocusSegmentSeconds = (startedAt?: string, endsAt?: string) => {
+  if (!startedAt || !endsAt) return 0
+  const startTime = new Date(startedAt).getTime()
+  const endTime = new Date(endsAt).getTime()
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return 0
+  return Math.max(
+    0,
+    Math.floor((Math.min(Date.now(), endTime) - startTime) / 1000),
+  )
+}
+
+const secondsToDisplayMinutes = (seconds: number) => Math.floor(seconds / 60)
+
+const getTotalFocusMinutes = (projects: Project[]) =>
+  projects.reduce(
+    (total, project) =>
+      total + secondsToDisplayMinutes(project.focusSeconds ?? project.minutes * 60),
+    0,
+  )
+
+const addFocusSecondsToProject = (project: Project, seconds: number): Project => {
+  const focusSeconds = Math.max(
+    0,
+    (project.focusSeconds ?? project.minutes * 60) + Math.max(0, seconds),
+  )
+  return {
+    ...project,
+    focusSeconds,
+    minutes: secondsToDisplayMinutes(focusSeconds),
+  }
+}
+
+const formatFocusRecordNotice = (projectName: string, seconds: number) => {
+  if (seconds < 60) return `已记录不到 1 分钟到 ${projectName}`
+  return `已记录 ${secondsToDisplayMinutes(seconds)} 分钟到 ${projectName}`
+}
+
+const settleFocusProject = (
+  current: DashboardState,
+  projectId: string,
+  seconds: number,
+) => {
+  if (seconds <= 0) return { projects: current.projects, notice: '' }
+  const targetProject = current.projects.find((project) => project.id === projectId)
+  if (!targetProject) return { projects: current.projects, notice: '' }
+  return {
+    projects: current.projects.map((project) =>
+      project.id === projectId ? addFocusSecondsToProject(project, seconds) : project,
+    ),
+    notice: formatFocusRecordNotice(targetProject.name, seconds),
+  }
+}
+
+const buildArchive = (current: DashboardState): DailyArchive => {
+  const completed = current.tasks.filter((task) => task.done)
+  const open = current.tasks.filter((task) => !task.done)
+  const summary =
+    current.reviewSummary ||
+    buildLocalSummary(current.review, completed, open, current.inbox)
+
+  return {
+    id: uid(),
+    date: todayIso(),
+    createdAt: new Date().toISOString(),
+    completedTasks: completed,
+    openTasks: open,
+    inbox: current.inbox,
+    review: current.review,
+    summary,
+    totalFocusMinutes: getTotalFocusMinutes(current.projects),
+  }
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardState>(() => loadState())
+  const [activeMainView, setActiveMainView] = useState<MainView>(() => loadMainView())
   const [now, setNow] = useState(() => new Date())
   const [newTopTask, setNewTopTask] = useState('')
   const [newTodo, setNewTodo] = useState('')
@@ -125,11 +293,24 @@ function App() {
   const [addingQuickLink, setAddingQuickLink] = useState(false)
   const [addingReminder, setAddingReminder] = useState(false)
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const [showCompletedProjects, setShowCompletedProjects] = useState(false)
+  const [pendingFocusProjectId, setPendingFocusProjectId] = useState<string | null>(null)
+  const [pendingFocusMinutes, setPendingFocusMinutes] = useState(() => dashboard.focus.durationMinutes)
+  const [expandedArchiveId, setExpandedArchiveId] = useState<string | null>(null)
   const [movedOrderItem, setMovedOrderItem] = useState<{
     id: string
     direction: 'up' | 'down'
   } | null>(null)
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MAIN_VIEW_STORAGE_KEY, activeMainView)
+    } catch {
+      // UI preference only; dashboard data persistence has its own notice path.
+    }
+  }, [activeMainView])
   const weatherRequestId = useRef(0)
+  const reminderDateInputRef = useRef<HTMLInputElement>(null)
 
   const updateDashboard = useCallback((updater: (current: DashboardState) => DashboardState) => {
     setDashboard(updater)
@@ -143,7 +324,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboard))
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboard))
+    } catch {
+      window.setTimeout(() => setDataNotice(STORAGE_FAILURE_NOTICE), 0)
+    }
     document.documentElement.dataset.theme = dashboard.theme
     document.documentElement.dataset.mode = dashboard.dayMode
   }, [dashboard])
@@ -155,16 +340,21 @@ function App() {
 
   useEffect(() => {
     if (!dashboard.focus.running) return
-    const interval = window.setInterval(() => {
+    const syncFocusClock = () => {
       setDashboard((current) => {
         if (!current.focus.running) return current
-        if (current.focus.secondsLeft <= 1) {
-          const minutes = current.focus.durationMinutes
-          const projects = current.projects.map((project) =>
-            project.id === current.focus.projectId
-              ? { ...project, minutes: project.minutes + minutes }
-              : project,
+        const secondsLeft = getFocusSecondsLeft(current.focus.endsAt)
+        if (secondsLeft <= 0) {
+          const elapsedSeconds = Math.max(
+            1,
+            getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt),
           )
+          const { projects, notice } = settleFocusProject(
+            current,
+            current.focus.projectId,
+            elapsedSeconds,
+          )
+          if (notice) window.setTimeout(() => setDataNotice(notice), 0)
           return {
             ...current,
             projects,
@@ -174,18 +364,23 @@ function App() {
               running: false,
               secondsLeft: current.focus.durationMinutes * 60,
               taskLabel: '',
+              endsAt: undefined,
+              startedAt: undefined,
             },
           }
         }
+        if (secondsLeft === current.focus.secondsLeft) return current
         return {
           ...current,
           focus: {
             ...current.focus,
-            secondsLeft: current.focus.secondsLeft - 1,
+            secondsLeft,
           },
         }
       })
-    }, 1000)
+    }
+    syncFocusClock()
+    const interval = window.setInterval(syncFocusClock, 1000)
     return () => window.clearInterval(interval)
   }, [dashboard.focus.running])
 
@@ -292,6 +487,22 @@ function App() {
     fetchWeatherForPosition,
   ])
 
+  const openQuickLink = useCallback((url: string) => {
+    const safeUrl = normalizeHttpUrl(url)
+    if (!safeUrl) {
+      setDataNotice(INVALID_LINK_NOTICE)
+      return
+    }
+    window.open(safeUrl, '_blank', 'noopener,noreferrer')
+  }, [])
+
+  const openReminderDatePicker = useCallback(() => {
+    const input = reminderDateInputRef.current
+    if (!input) return
+    input.focus()
+    input.showPicker?.()
+  }, [])
+
   const setWeatherCity = useCallback(async (city: string) => {
     const trimmed = city.trim()
     if (!trimmed) return
@@ -318,20 +529,27 @@ function App() {
   const topTasks = dashboard.tasks.filter((task) => task.kind === 'top')
   const todos = dashboard.tasks.filter((task) => task.kind === 'todo')
   const completedTasks = dashboard.tasks.filter((task) => task.done).length
-  const activeProject = dashboard.projects.find(
-    (project) => project.id === dashboard.focus.projectId,
+  const completedTopTasks = topTasks.filter((task) => task.done).length
+  const activeProjects = useMemo(
+    () => dashboard.projects.filter((project) => project.active !== false),
+    [dashboard.projects],
   )
+  const completedProjects = useMemo(
+    () => dashboard.projects.filter((project) => project.active === false),
+    [dashboard.projects],
+  )
+  const activeProject = activeProjects.find((project) => project.id === dashboard.focus.projectId)
   const completionRate = dashboard.tasks.length
     ? Math.round((completedTasks / dashboard.tasks.length) * 100)
     : 0
   const priorityTopTask = topTasks.find((task) => !task.done)
   const priorityTodo = todos.find((task) => !task.done)
   const suggestedProject =
-    activeProject ?? dashboard.projects.find((project) => project.active) ?? dashboard.projects[0]
+    activeProject ?? activeProjects.find((project) => project.active) ?? activeProjects[0]
   const defaultFocusProject =
-    dashboard.projects.find((project) => project.name === '个人指挥台') ??
-    dashboard.projects.find((project) => project.active) ??
-    dashboard.projects[0]
+    activeProjects.find((project) => project.name === '个人指挥台') ??
+    activeProjects.find((project) => project.active) ??
+    activeProjects[0]
   const focusTarget = priorityTopTask
     ? {
         label: priorityTopTask.title,
@@ -346,10 +564,27 @@ function App() {
           label: suggestedProject?.nextAction ?? '先写下一个可以立刻开始的动作',
           source: suggestedProject ? '来自项目推进' : '等待设置目标',
         }
-  const totalFocusMinutes = dashboard.projects.reduce(
-    (total, project) => total + project.minutes,
-    0,
-  )
+  const hasPausedFocus =
+    !dashboard.focus.running &&
+    Boolean(dashboard.focus.projectId) &&
+    Boolean(dashboard.focus.taskLabel) &&
+    dashboard.focus.secondsLeft > 0 &&
+    dashboard.focus.secondsLeft < dashboard.focus.durationMinutes * 60
+  const visibleFocusTarget = {
+    label: dashboard.focus.running
+      ? dashboard.currentFocus
+      : hasPausedFocus
+        ? dashboard.focus.taskLabel
+        : focusTarget.label,
+    source: dashboard.focus.running
+      ? activeProject
+        ? `正在记录到 ${activeProject.name}`
+        : '正在专注'
+      : hasPausedFocus
+        ? '已暂停，可继续'
+        : focusTarget.source,
+  }
+  const totalFocusMinutes = getTotalFocusMinutes(dashboard.projects)
   const upcomingReminders = dashboard.reminders
     .slice()
     .sort((a, b) => daysUntil(a.date) - daysUntil(b.date))
@@ -363,7 +598,43 @@ function App() {
   const editingQuickLink = dashboard.quickLinks.find(
     (item) => item.id === editingQuickLinkId,
   )
+  const pendingFocusProject = activeProjects.find(
+    (project) => project.id === pendingFocusProjectId,
+  )
   const latestArchive = dashboard.archives[0]
+  const todayArchive = dashboard.archives.find((archive) => archive.date === todayIso())
+  const recentArchives = dashboard.archives.slice(0, 6)
+  const selectedArchive =
+    recentArchives.find((archive) => archive.id === expandedArchiveId) ??
+    (expandedArchiveId === 'today' ? todayArchive : undefined) ??
+    recentArchives[0]
+  const reviewReceiptItems = [
+    {
+      label: '今日完成',
+      value: `${completedTasks}/${dashboard.tasks.length}`,
+      detail: `${completionRate}%`,
+    },
+    {
+      label: 'Top 3',
+      value: `${completedTopTasks}/${topTasks.length || 3}`,
+      detail: '核心推进',
+    },
+    {
+      label: '专注累计',
+      value: `${totalFocusMinutes}`,
+      detail: '分钟',
+    },
+    {
+      label: '灵感暂存',
+      value: `${dashboard.inbox.length}`,
+      detail: '条',
+    },
+    {
+      label: '临近提醒',
+      value: `${urgentReminderCount}`,
+      detail: '个',
+    },
+  ]
   const aiSettingsIssue = getAiSettingsIssue(dashboard.ai)
   const summaryModeLabel = dashboard.ai.enabled ? 'AI 总结' : '本地总结'
 
@@ -483,6 +754,16 @@ function App() {
     }
   }
 
+  const cancelTaskAdd = (kind: TaskKind) => {
+    if (kind === 'top') {
+      setNewTopTask('')
+      setAddingTopTask(false)
+    } else {
+      setNewTodo('')
+      setAddingTodo(false)
+    }
+  }
+
   const toggleTask = useCallback((id: string) => {
     updateDashboard((current) => ({
       ...current,
@@ -534,7 +815,7 @@ function App() {
       ...current,
       projects: [
         ...current.projects,
-        { id: uid(), name, nextAction, minutes: 0, active: true },
+        { id: uid(), name, nextAction, minutes: 0, focusSeconds: 0, active: true },
       ],
     }))
     setNewProjectName('')
@@ -552,26 +833,99 @@ function App() {
   }
 
   const removeProject = (id: string) => {
+    updateDashboard((current) => {
+      const elapsedSeconds =
+        current.focus.running && current.focus.projectId === id
+          ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
+          : 0
+      return {
+        ...current,
+        projects: current.projects
+          .map((project) =>
+            project.id === id && elapsedSeconds > 0
+              ? addFocusSecondsToProject(project, elapsedSeconds)
+              : project,
+          )
+          .filter((project) => project.id !== id),
+        focus:
+          current.focus.projectId === id
+            ? {
+                ...current.focus,
+                projectId: '',
+                running: false,
+                endsAt: undefined,
+                startedAt: undefined,
+              }
+            : current.focus,
+      }
+    })
+    setPendingFocusProjectId((current) => (current === id ? null : current))
+  }
+
+  const completeProject = (id: string) => {
+    updateDashboard((current) => {
+      const elapsedSeconds =
+        current.focus.running && current.focus.projectId === id
+          ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
+          : 0
+      return {
+        ...current,
+        projects: current.projects.map((project) =>
+          project.id === id
+            ? {
+                ...addFocusSecondsToProject(project, elapsedSeconds),
+                active: false,
+              }
+            : project,
+        ),
+        currentFocus:
+          current.focus.projectId === id ? '等待下一次启动' : current.currentFocus,
+        focus:
+          current.focus.projectId === id
+            ? {
+                ...current.focus,
+                projectId: '',
+                running: false,
+                taskLabel: '',
+                secondsLeft: current.focus.durationMinutes * 60,
+                endsAt: undefined,
+                startedAt: undefined,
+              }
+            : current.focus,
+      }
+    })
+    setEditingProjectId((current) => (current === id ? null : current))
+    setShowCompletedProjects(true)
+    setPendingFocusProjectId((current) => (current === id ? null : current))
+  }
+
+  const restoreProject = (id: string) => {
     updateDashboard((current) => ({
       ...current,
-      projects: current.projects.filter((project) => project.id !== id),
-      focus:
-        current.focus.projectId === id
-          ? { ...current.focus, projectId: '', running: false }
-          : current.focus,
+      projects: current.projects.map((project) =>
+        project.id === id ? { ...project, active: true } : project,
+      ),
     }))
   }
 
   const moveProject = (id: string, direction: 'up' | 'down') => {
     let moved = false
     updateDashboard((current) => {
-      const index = current.projects.findIndex((project) => project.id === id)
-      const targetIndex = direction === 'up' ? index - 1 : index + 1
-      if (index < 0 || targetIndex < 0 || targetIndex >= current.projects.length) {
+      const activeIds = current.projects
+        .filter((project) => project.active !== false)
+        .map((project) => project.id)
+      const activeIndex = activeIds.indexOf(id)
+      const targetActiveIndex = direction === 'up' ? activeIndex - 1 : activeIndex + 1
+      const targetId = activeIds[targetActiveIndex]
+      if (activeIndex < 0 || !targetId) {
         return current
       }
 
       const projects = [...current.projects]
+      const index = projects.findIndex((project) => project.id === id)
+      const targetIndex = projects.findIndex((project) => project.id === targetId)
+      if (index < 0 || targetIndex < 0) return current
+
       ;[projects[index], projects[targetIndex]] = [projects[targetIndex], projects[index]]
       moved = true
       return { ...current, projects }
@@ -672,28 +1026,102 @@ function App() {
 
     updateDashboard((current) => {
       const nextLabel = taskLabel || project.nextAction
+      const isSwitchingRunningFocus =
+        current.focus.running &&
+        (current.focus.projectId !== project.id || current.focus.taskLabel !== nextLabel)
+      const elapsedSeconds = isSwitchingRunningFocus
+        ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
+        : 0
       const isSamePausedFocus =
         !current.focus.running &&
         current.focus.projectId === project.id &&
         current.focus.taskLabel === nextLabel &&
         current.focus.secondsLeft > 0 &&
         current.focus.secondsLeft < current.focus.durationMinutes * 60
+      const secondsLeft = isSamePausedFocus
+        ? current.focus.secondsLeft
+        : current.focus.durationMinutes * 60
+      const { projects, notice } = settleFocusProject(
+        current,
+        current.focus.projectId,
+        elapsedSeconds,
+      )
+      if (notice) window.setTimeout(() => setDataNotice(notice), 0)
 
       return {
         ...current,
+        projects,
         currentFocus: nextLabel,
         focus: {
           ...current.focus,
           running: true,
           projectId: project.id,
           taskLabel: nextLabel,
-          secondsLeft: isSamePausedFocus
-            ? current.focus.secondsLeft
-            : current.focus.durationMinutes * 60,
+          secondsLeft,
+          endsAt: createFocusEndTime(secondsLeft),
+          startedAt: new Date().toISOString(),
         },
       }
     })
   }, [dashboard.focus.projectId, dashboard.projects, updateDashboard])
+
+  const openProjectFocusDialog = useCallback((project: Project) => {
+    setPendingFocusProjectId(project.id)
+    setPendingFocusMinutes(dashboard.focus.durationMinutes)
+  }, [dashboard.focus.durationMinutes])
+
+  const startPendingProjectFocus = useCallback(() => {
+    if (!pendingFocusProject) return
+    const durationMinutes = Math.min(120, Math.max(5, pendingFocusMinutes))
+    updateDashboard((current) => {
+      const project = current.projects.find((item) => item.id === pendingFocusProject.id)
+      if (!project) return current
+
+      const elapsedSeconds = current.focus.running
+        ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
+        : 0
+      const { projects, notice } = settleFocusProject(
+        current,
+        current.focus.projectId,
+        elapsedSeconds,
+      )
+      const secondsLeft = durationMinutes * 60
+      if (notice) window.setTimeout(() => setDataNotice(notice), 0)
+
+      return {
+        ...current,
+        projects,
+        currentFocus: project.nextAction,
+        focus: {
+          ...current.focus,
+          durationMinutes,
+          running: true,
+          projectId: project.id,
+          taskLabel: project.nextAction,
+          secondsLeft,
+          endsAt: createFocusEndTime(secondsLeft),
+          startedAt: new Date().toISOString(),
+        },
+      }
+    })
+    setPendingFocusProjectId(null)
+    setActiveMainView('start')
+  }, [pendingFocusMinutes, pendingFocusProject, updateDashboard])
+
+  useEffect(() => {
+    if (!pendingFocusProjectId) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPendingFocusProjectId(null)
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        startPendingProjectFocus()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [pendingFocusProjectId, startPendingProjectFocus])
 
   const commandResults = useMemo(() => {
     const query = commandQuery.trim().toLowerCase()
@@ -703,7 +1131,7 @@ function App() {
         title: item.label,
         meta: item.url,
         type: '快速入口',
-        action: () => window.open(item.url, '_blank', 'noopener,noreferrer'),
+        action: () => openQuickLink(item.url),
       })),
       ...dashboard.tasks.map((item) => ({
         id: `task-${item.id}`,
@@ -712,12 +1140,12 @@ function App() {
         type: '任务',
         action: () => toggleTask(item.id),
       })),
-      ...dashboard.projects.map((item) => ({
+      ...activeProjects.map((item) => ({
         id: `project-${item.id}`,
         title: item.name,
         meta: item.nextAction,
         type: '项目',
-        action: () => startFocus(item.id, item.nextAction),
+        action: () => openProjectFocusDialog(item),
       })),
       ...dashboard.inbox.map((item) => ({
         id: `inbox-${item.id}`,
@@ -741,30 +1169,66 @@ function App() {
     commandQuery,
     dashboard.quickLinks,
     dashboard.tasks,
-    dashboard.projects,
     dashboard.inbox,
-    startFocus,
+    activeProjects,
+    openQuickLink,
+    openProjectFocusDialog,
     toggleTask,
   ])
 
   const pauseFocus = () => {
-    updateDashboard((current) => ({
-      ...current,
-      focus: { ...current.focus, running: false },
-    }))
+    updateDashboard((current) => {
+      const elapsedSeconds = current.focus.running
+        ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
+        : 0
+      const secondsLeft = current.focus.running
+        ? getFocusSecondsLeft(current.focus.endsAt)
+        : current.focus.secondsLeft
+      const { projects, notice } = settleFocusProject(
+        current,
+        current.focus.projectId,
+        elapsedSeconds,
+      )
+      if (notice) window.setTimeout(() => setDataNotice(notice), 0)
+      return {
+        ...current,
+        projects,
+        focus: {
+          ...current.focus,
+          running: false,
+          secondsLeft,
+          endsAt: undefined,
+          startedAt: undefined,
+        },
+      }
+    })
   }
 
   const resetFocus = () => {
-    updateDashboard((current) => ({
-      ...current,
-      currentFocus: '等待下一次启动',
-      focus: {
-        ...current.focus,
-        running: false,
-        secondsLeft: current.focus.durationMinutes * 60,
-        taskLabel: '',
-      },
-    }))
+    updateDashboard((current) => {
+      const elapsedSeconds = current.focus.running
+        ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
+        : 0
+      const { projects, notice } = settleFocusProject(
+        current,
+        current.focus.projectId,
+        elapsedSeconds,
+      )
+      if (notice) window.setTimeout(() => setDataNotice(notice), 0)
+      return {
+        ...current,
+        projects,
+        currentFocus: '等待下一次启动',
+        focus: {
+          ...current.focus,
+          running: false,
+          secondsLeft: current.focus.durationMinutes * 60,
+          taskLabel: '',
+          endsAt: undefined,
+          startedAt: undefined,
+        },
+      }
+    })
   }
 
   const setFocusDuration = (durationMinutes: number) => {
@@ -774,8 +1238,10 @@ function App() {
         ...current.focus,
         durationMinutes,
         secondsLeft: current.focus.running
-          ? current.focus.secondsLeft
+          ? getFocusSecondsLeft(current.focus.endsAt)
           : durationMinutes * 60,
+        endsAt: current.focus.running ? current.focus.endsAt : undefined,
+        startedAt: current.focus.running ? current.focus.startedAt : undefined,
       },
     }))
   }
@@ -851,25 +1317,7 @@ function App() {
 
   const archiveToday = () => {
     updateDashboard((current) => {
-      const completed = current.tasks.filter((task) => task.done)
-      const open = current.tasks.filter((task) => !task.done)
-      const summary =
-        current.reviewSummary ||
-        buildLocalSummary(current.review, completed, open, current.inbox)
-      const archive: DailyArchive = {
-        id: uid(),
-        date: todayIso(),
-        createdAt: new Date().toISOString(),
-        completedTasks: completed,
-        openTasks: open,
-        inbox: current.inbox,
-        review: current.review,
-        summary,
-        totalFocusMinutes: current.projects.reduce(
-          (total, project) => total + project.minutes,
-          0,
-        ),
-      }
+      const archive = buildArchive(current)
 
       return {
         ...current,
@@ -877,10 +1325,11 @@ function App() {
           archive,
           ...current.archives.filter((item) => item.date !== archive.date),
         ].slice(0, 60),
-        reviewSummary: summary,
+        reviewSummary: archive.summary,
       }
     })
-    setDataNotice('已归档今天')
+    setExpandedArchiveId('today')
+    setDataNotice('已归档今天，可在最近归档里查看')
   }
 
   const exportBackup = () => {
@@ -888,48 +1337,37 @@ function App() {
       app: 'Personal Command Deck',
       version: 1,
       exportedAt: new Date().toISOString(),
-      state: dashboard,
+      state: createBackupState(dashboard),
     }
     downloadTextFile(
       `personal-command-deck-${todayIso()}.json`,
       JSON.stringify(backup, null, 2),
     )
-    setDataNotice('已导出备份')
+    setDataNotice('已导出备份（不包含 API Key）')
   }
 
   const importBackup = async (file: File) => {
     try {
       const text = await readFileAsText(file)
-      const parsed = JSON.parse(text) as Partial<DashboardBackup> | StoredDashboardState
-      const incoming =
-        'state' in parsed && parsed.state
-          ? (parsed.state as StoredDashboardState)
-          : (parsed as StoredDashboardState)
-      const quotes = normalizeQuotes(incoming)
-      setDashboard({
-        ...defaultState,
-        ...incoming,
-        motto: undefined,
-        ...quotes,
-        weather: { ...defaultState.weather, ...incoming.weather },
-        focus: { ...defaultState.focus, ...incoming.focus, running: false },
-        review: { ...defaultState.review, ...incoming.review },
-        ai: { ...defaultState.ai, ...incoming.ai },
-        tasks: incoming.tasks?.length ? incoming.tasks : defaultState.tasks,
-        projects: incoming.projects?.length ? incoming.projects : defaultState.projects,
-        quickLinks: incoming.quickLinks?.length
-          ? incoming.quickLinks
-          : defaultState.quickLinks,
-        reminders: incoming.reminders?.length
-          ? incoming.reminders
-          : defaultState.reminders,
-        inbox: incoming.inbox ?? defaultState.inbox,
-        archives: incoming.archives ?? defaultState.archives,
-        reviewSummary: incoming.reviewSummary ?? defaultState.reviewSummary,
-      })
-      setDataNotice('已导入备份')
-    } catch {
-      setDataNotice('导入失败：文件格式不对')
+      const incoming = extractBackupState(JSON.parse(text))
+      const confirmed = window.confirm(
+        '导入会覆盖当前本地数据，但会保留本机已填写的 API Key。确认继续？',
+      )
+      if (!confirmed) {
+        setDataNotice('已取消导入')
+        return
+      }
+      setDashboard((current) =>
+        normalizeDashboardState(incoming, {
+          currentState: current,
+          preserveAiKey: true,
+        }),
+      )
+      setDataNotice('已导入备份（保留本机 API Key）')
+    } catch (error) {
+      setDataNotice(
+        `导入失败：${error instanceof Error ? error.message : '文件格式不对'}`,
+      )
     }
   }
 
@@ -1112,11 +1550,12 @@ function App() {
         />
 
         <div className="data-actions" aria-label="本地数据">
-          <button type="button" title="导出本地备份" onClick={exportBackup}>
+          <span>本地备份</span>
+          <button type="button" title="导出本地备份，不包含 API Key" onClick={exportBackup}>
             <Download size={15} />
             导出
           </button>
-          <label title="导入本地备份">
+          <label title="导入会覆盖当前本地数据，但保留本机 API Key">
             <Upload size={15} />
             导入
             <input
@@ -1142,19 +1581,41 @@ function App() {
         </button>
       </section>
 
-      <section className="execution-hero" aria-label="执行启动区">
+      <nav className="main-view-tabs" aria-label="主界面">
+        {mainViewOptions.map((view) => (
+          <button
+            key={view.value}
+            type="button"
+            className={activeMainView === view.value ? 'active' : ''}
+            aria-current={activeMainView === view.value ? 'page' : undefined}
+            onClick={() => setActiveMainView(view.value)}
+          >
+            {view.icon}
+            <span>{view.label}</span>
+            <small>{view.hint}</small>
+          </button>
+        ))}
+      </nav>
+
+      {activeMainView === 'start' && (
+      <section className="main-view-panel start-view" aria-label="聚焦界面">
         <article className="panel focus-start-panel">
           <PanelTitle icon={<Focus size={20} />} title="今日专注" aside={`${completionRate}%`} />
           <div className="focus-priority">
             <span>本轮目标</span>
-            <strong>{focusTarget.label}</strong>
-            <small className="focus-source">{focusTarget.source}</small>
+            <strong>{visibleFocusTarget.label}</strong>
+            <small className="focus-source">{visibleFocusTarget.source}</small>
           </div>
           <FocusControls
             dashboard={dashboard}
-            focusLabel={dashboard.focus.running ? dashboard.currentFocus : focusTarget.label}
+            focusLabel={visibleFocusTarget.label}
             onDurationChange={setFocusDuration}
-            onStart={() => startFocus(defaultFocusProject?.id, focusTarget.label)}
+            onStart={() =>
+              startFocus(
+                hasPausedFocus ? dashboard.focus.projectId : defaultFocusProject?.id,
+                visibleFocusTarget.label,
+              )
+            }
             onPause={pauseFocus}
             onReset={resetFocus}
           />
@@ -1171,6 +1632,10 @@ function App() {
               <span>临近提醒</span>
               <strong>{urgentReminderCount} 个</strong>
             </div>
+          </div>
+          <div className="focus-record-hint">
+            <Check size={15} />
+            <span>{dataNotice || '专注暂停、重置或自然结束时，会把已过去的分钟记录到当前项目。'}</span>
           </div>
         </article>
 
@@ -1190,17 +1655,29 @@ function App() {
             </button>
           </div>
           <div className="quick-grid">
-            {dashboard.quickLinks.map((item) => (
-              <div
-                className={
-                  editingQuickLinkId === item.id
-                    ? 'quick-link-shell editing'
-                    : 'quick-link-shell'
-                }
-                key={item.id}
-              >
-                <div className="quick-link-main">
-                  <a href={item.url} target="_blank" rel="noreferrer" title={item.url}>
+            {dashboard.quickLinks.map((item) => {
+              const safeUrl = normalizeHttpUrl(item.url)
+              return (
+                <div
+                  className={
+                    editingQuickLinkId === item.id
+                      ? 'quick-link-shell editing'
+                      : 'quick-link-shell'
+                  }
+                  key={item.id}
+                >
+                  <div className="quick-link-main">
+                    <a
+                      href={safeUrl || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={item.url}
+                      aria-disabled={!safeUrl}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        openQuickLink(item.url)
+                      }}
+                    >
                     <IconByName name={item.icon} />
                     <span>{item.label}</span>
                     <ExternalLink size={13} />
@@ -1220,7 +1697,8 @@ function App() {
                   </button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
           {editingQuickLink && (
             <div className="quick-link-editor">
@@ -1245,6 +1723,7 @@ function App() {
                   <span>图标</span>
                   <ThemedSelect
                     compact
+                    className="quick-link-icon-select"
                     value={editingQuickLink.icon}
                     aria-label={`${editingQuickLink.label} 图标`}
                     options={linkIconOptions}
@@ -1318,6 +1797,7 @@ function App() {
                   <span>图标</span>
                   <ThemedSelect
                     compact
+                    className="quick-link-icon-select"
                     value={newLinkIcon}
                     aria-label="入口图标"
                     options={linkIconOptions}
@@ -1353,8 +1833,10 @@ function App() {
           )}
         </article>
       </section>
+      )}
 
-      <section className="execution-grid" aria-label="个人作战桌面">
+      {activeMainView === 'execute' && (
+      <section className="main-view-panel execute-view" aria-label="推进界面">
         <article className="panel today-panel">
           <PanelTitle
             icon={<SquareCheckBig size={20} />}
@@ -1403,6 +1885,14 @@ function App() {
                   if (event.key === 'Enter') addTask('top')
                 }}
               />
+              <button
+                type="button"
+                className="inline-cancel"
+                title="取消添加"
+                onClick={() => cancelTaskAdd('top')}
+              >
+                <X size={16} />
+              </button>
               <button
                 type="button"
                 disabled={topTasks.length >= 3}
@@ -1456,6 +1946,14 @@ function App() {
                   if (event.key === 'Enter') addTask('todo')
                 }}
               />
+              <button
+                type="button"
+                className="inline-cancel"
+                title="取消添加"
+                onClick={() => cancelTaskAdd('todo')}
+              >
+                <X size={16} />
+              </button>
               <button type="button" title="添加待办" onClick={() => addTask('todo')}>
                 <Plus size={17} />
               </button>
@@ -1488,10 +1986,10 @@ function App() {
             </button>
           </div>
           <div className="project-stack">
-            {dashboard.projects.map((project, index) => {
+            {activeProjects.map((project, index) => {
               const isEditing = editingProjectId === project.id
               const canMoveUp = index > 0
-              const canMoveDown = index < dashboard.projects.length - 1
+              const canMoveDown = index < activeProjects.length - 1
               const orderMoveDirection =
                 movedOrderItem?.id === project.id ? movedOrderItem.direction : undefined
               return (
@@ -1540,6 +2038,14 @@ function App() {
                             onMoveUp={() => moveProject(project.id, 'up')}
                             onMoveDown={() => moveProject(project.id, 'down')}
                           />
+                          <button
+                            type="button"
+                            className="secondary-action project-complete-action"
+                            onClick={() => completeProject(project.id)}
+                          >
+                            <Archive size={14} />
+                            结项
+                          </button>
                           <button type="button" onClick={() => setEditingProjectId(null)}>
                             <Check size={14} />
                             完成
@@ -1576,8 +2082,17 @@ function App() {
                           </div>
                           <button
                             type="button"
+                            className="secondary-action project-complete-action"
+                            title="结项"
+                            onClick={() => completeProject(project.id)}
+                          >
+                            <Archive size={14} />
+                            结项
+                          </button>
+                          <button
+                            type="button"
                             className="primary-action project-focus-action"
-                            onClick={() => startFocus(project.id, project.nextAction)}
+                            onClick={() => openProjectFocusDialog(project)}
                           >
                             <Play size={14} />
                             专注
@@ -1589,7 +2104,52 @@ function App() {
                 </div>
               )
             })}
+            {!activeProjects.length && (
+              <div className="project-empty">没有进行中的项目，新增一个下一步动作开始推进。</div>
+            )}
           </div>
+          {completedProjects.length > 0 && (
+            <div className="completed-projects">
+              <button
+                type="button"
+                className="completed-projects-toggle"
+                onClick={() => setShowCompletedProjects((current) => !current)}
+              >
+                <Archive size={14} />
+                <span>已结项 {completedProjects.length}</span>
+                <small>{showCompletedProjects ? '收起' : '展开'}</small>
+              </button>
+              {showCompletedProjects && (
+                <div className="completed-project-list">
+                  {completedProjects.map((project) => (
+                    <div className="completed-project-row" key={project.id}>
+                      <div>
+                        <strong>{project.name}</strong>
+                        <span>{project.nextAction || '没有记录下一步动作'}</span>
+                        <small>{project.minutes} 分钟已记录</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary-action"
+                        onClick={() => restoreProject(project.id)}
+                      >
+                        <RefreshCw size={13} />
+                        恢复
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button danger"
+                        title="删除已结项项目"
+                        onClick={() => removeProject(project.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {addingProject && (
             <div className="field-form project-form">
               <div className="quick-link-editor-title">
@@ -1727,23 +2287,35 @@ function App() {
                   />
                 </label>
                 <div className="reminder-form-row">
-                  <label className="quick-link-editor-field">
+                  <label className="quick-link-editor-field reminder-date-field">
                     <span>日期</span>
-                    <input
-                      type="date"
-                      value={newReminderDate}
-                      onChange={(event) => setNewReminderDate(event.target.value)}
-                    />
+                    <div className="date-input-shell">
+                      <input
+                        ref={reminderDateInputRef}
+                        type="date"
+                        value={newReminderDate}
+                        onChange={(event) => setNewReminderDate(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="reminder-date-picker-button"
+                        aria-label="打开日期选择"
+                        title="打开日期选择"
+                        onClick={openReminderDatePicker}
+                      >
+                        <CalendarClock size={18} />
+                      </button>
+                    </div>
                   </label>
-                  <label className="quick-link-editor-field">
+                  <label className="quick-link-editor-field reminder-type-field">
                     <span>类型</span>
-                    <input
+                    <ThemedSelect
+                      compact
+                      className="reminder-type-select"
                       value={newReminderType}
-                      placeholder="Deadline"
-                      onChange={(event) => setNewReminderType(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') addReminder()
-                      }}
+                      aria-label="提醒类型"
+                      options={reminderTypeOptions}
+                      onChange={setNewReminderType}
                     />
                   </label>
                 </div>
@@ -1765,174 +2337,290 @@ function App() {
           </article>
         </aside>
       </section>
+      )}
 
-      <section className="execution-review" aria-label="AI 每日总结">
+      {activeMainView === 'review' && (
+      <section className="main-view-panel review-view" aria-label="复盘界面">
         <article className="panel ai-review-panel">
-          <div className="panel-title panel-title-action">
+          <div className="panel-title review-title">
             <div>
               <Moon size={20} />
-              <h2>收工复盘</h2>
+              <h2>每日复盘</h2>
             </div>
-            <div className="review-actions">
-              <span>{todayIso()}</span>
-              <button
-                type="button"
-                className={dashboard.ai.enabled ? 'api-active' : ''}
-                onClick={() => setAiSettingsOpen((current) => !current)}
-              >
-                <Cpu size={15} />
-                {dashboard.ai.enabled ? 'API 已接入' : '接入 API'}
-              </button>
-              <button
-                type="button"
-                disabled={aiLoading}
-                onClick={() => void generateReviewSummary()}
-              >
-                <Sparkles size={15} />
-                {aiLoading ? '生成中...' : '生成总结'}
-              </button>
-              <button type="button" onClick={archiveToday}>
-                <Archive size={15} />
-                归档今天
-              </button>
-            </div>
+            <span>{todayIso()}</span>
           </div>
-          {aiSettingsOpen && (
-            <div className="ai-settings-panel">
-              <div className="ai-settings-head">
-                <div>
-                  <span>AI API</span>
-                  <strong>
-                    {dashboard.ai.enabled
-                      ? `${dashboard.ai.provider} · ${dashboard.ai.model || '未选模型'}`
-                      : '默认使用本地总结'}
-                  </strong>
+
+          <section className="review-receipt" aria-label="今日收据">
+            <div className="review-section-heading">
+              <div>
+                <Check size={17} />
+                <span>今日收据</span>
+              </div>
+              <small>{todayArchive ? '今天已归档' : '准备复盘'}</small>
+            </div>
+            <div className="review-receipt-grid">
+              {reviewReceiptItems.map((item) => (
+                <div className="review-receipt-card" key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.detail}</small>
                 </div>
-                <label className="ai-toggle">
-                  <input
-                    type="checkbox"
-                    checked={dashboard.ai.enabled}
-                    onChange={(event) =>
-                      updateAiSettings({ enabled: event.target.checked })
-                    }
-                  />
-                  <span>{dashboard.ai.enabled ? '已启用' : '未启用'}</span>
-                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="review-flow" aria-label="三分钟复盘">
+            <div className="review-section-heading">
+              <div>
+                <Pencil size={17} />
+                <span>3 分钟复盘</span>
               </div>
-              <div className="ai-settings-grid">
-                <label className="quick-link-editor-field">
-                  <span>提供商</span>
-                  <ThemedSelect
-                    compact
-                    value={dashboard.ai.provider}
-                    aria-label="AI 提供商"
-                    options={aiProviderOptions}
-                    onChange={(provider) => setAiProvider(provider as AiProvider)}
-                  />
-                </label>
-                <label className="quick-link-editor-field">
-                  <span>API Key</span>
-                  <input
-                    type="password"
-                    value={dashboard.ai.apiKey}
-                    placeholder="只保存在本机 localStorage"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    onChange={(event) =>
-                      updateAiSettings({ apiKey: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="quick-link-editor-field ai-base-field">
-                  <span>API 地址</span>
-                  <input
-                    value={dashboard.ai.baseUrl}
-                    placeholder="https://api.openai.com/v1"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    onChange={(event) =>
-                      updateAiSettings({ baseUrl: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="quick-link-editor-field">
-                  <span>模型</span>
-                  <input
-                    value={dashboard.ai.model}
-                    placeholder="gpt-4.1-mini"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    onChange={(event) =>
-                      updateAiSettings({ model: event.target.value })
-                    }
-                  />
-                </label>
+              <small>轻一点，写事实就够</small>
+            </div>
+            <div className="review-grid">
+              <label className="review-step">
+                <span>1</span>
+                <strong>今天推进</strong>
+                <textarea
+                  value={dashboard.review.did}
+                  onChange={(event) => updateReview({ did: event.target.value })}
+                  placeholder="三两句就够"
+                />
+              </label>
+              <label className="review-step">
+                <span>2</span>
+                <strong>卡在哪里</strong>
+                <textarea
+                  value={dashboard.review.stuck}
+                  onChange={(event) => updateReview({ stuck: event.target.value })}
+                  placeholder="只记录事实，不审判自己"
+                />
+              </label>
+              <label className="review-step">
+                <span>3</span>
+                <strong>明天第一步</strong>
+                <textarea
+                  value={dashboard.review.tomorrow}
+                  onChange={(event) => updateReview({ tomorrow: event.target.value })}
+                  placeholder="醒来直接做的那一小步"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="review-draft" aria-label="AI 复盘草稿">
+            <div className="review-section-heading">
+              <div>
+                <Sparkles size={17} />
+                <span>复盘草稿</span>
               </div>
-              <div className="ai-settings-note">
-                <span>提示词会自动读取今日任务、项目、暂存、提醒和复盘输入。</span>
+              <div className="review-actions">
                 <button
                   type="button"
-                  className="secondary-action"
-                  onClick={() => setAiSettingsOpen(false)}
+                  className={dashboard.ai.enabled ? 'api-active' : ''}
+                  onClick={() => setAiSettingsOpen((current) => !current)}
                 >
-                  完成
+                  <Cpu size={15} />
+                  {dashboard.ai.enabled ? 'API 已接入' : '接入 API'}
+                </button>
+                <button
+                  type="button"
+                  disabled={aiLoading}
+                  onClick={() => void generateReviewSummary()}
+                >
+                  <Sparkles size={15} />
+                  {aiLoading ? '生成中...' : '生成复盘草稿'}
                 </button>
               </div>
-              {dashboard.ai.enabled && aiSettingsIssue && (
-                <p className="ai-error">{aiSettingsIssue}</p>
-              )}
-              {aiError && <p className="ai-error">{aiError}</p>}
             </div>
-          )}
-          <div className="review-grid">
-            <label>
-              今天做了什么？
-              <textarea
-                value={dashboard.review.did}
-                onChange={(event) => updateReview({ did: event.target.value })}
-                placeholder="三两句就够"
-              />
-            </label>
-            <label>
-              卡在了哪里？
-              <textarea
-                value={dashboard.review.stuck}
-                onChange={(event) => updateReview({ stuck: event.target.value })}
-                placeholder="只记录事实，不审判自己"
-              />
-            </label>
-            <label>
-              明天第一件事是什么？
-              <textarea
-                value={dashboard.review.tomorrow}
-                onChange={(event) => updateReview({ tomorrow: event.target.value })}
-                placeholder="醒来直接做的那一小步"
-              />
-            </label>
-          </div>
-          <div className="review-summary">
+            {aiSettingsOpen && (
+              <div className="ai-settings-panel">
+                <div className="ai-settings-head">
+                  <div>
+                    <span>AI API</span>
+                    <strong>
+                      {dashboard.ai.enabled
+                        ? `${dashboard.ai.provider} · ${dashboard.ai.model || '未选模型'}`
+                        : '默认使用本地总结'}
+                    </strong>
+                  </div>
+                  <label className="ai-toggle">
+                    <input
+                      type="checkbox"
+                      checked={dashboard.ai.enabled}
+                      onChange={(event) =>
+                        updateAiSettings({ enabled: event.target.checked })
+                      }
+                    />
+                    <span>{dashboard.ai.enabled ? '已启用' : '未启用'}</span>
+                  </label>
+                </div>
+                <div className="ai-settings-grid">
+                  <label className="quick-link-editor-field">
+                    <span>提供商</span>
+                    <ThemedSelect
+                      compact
+                      value={dashboard.ai.provider}
+                      aria-label="AI 提供商"
+                      options={aiProviderOptions}
+                      onChange={(provider) => setAiProvider(provider as AiProvider)}
+                    />
+                  </label>
+                  <label className="quick-link-editor-field">
+                    <span>API Key</span>
+                    <input
+                      type="password"
+                      value={dashboard.ai.apiKey}
+                      placeholder="只保存在本机 localStorage"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        updateAiSettings({ apiKey: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="quick-link-editor-field ai-base-field">
+                    <span>API 地址</span>
+                    <input
+                      value={dashboard.ai.baseUrl}
+                      placeholder="https://api.openai.com/v1"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        updateAiSettings({ baseUrl: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="quick-link-editor-field">
+                    <span>模型</span>
+                    <input
+                      value={dashboard.ai.model}
+                      placeholder="gpt-4.1-mini"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        updateAiSettings({ model: event.target.value })
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="ai-settings-note">
+                  <span>提示词会自动读取今日任务、项目、暂存、提醒和复盘输入。</span>
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => setAiSettingsOpen(false)}
+                  >
+                    完成
+                  </button>
+                </div>
+                {dashboard.ai.enabled && aiSettingsIssue && (
+                  <p className="ai-error">{aiSettingsIssue}</p>
+                )}
+                {aiError && <p className="ai-error">{aiError}</p>}
+              </div>
+            )}
+            <div className="review-summary">
+              <div>
+                <Sparkles size={17} />
+                <span>{summaryModeLabel}</span>
+              </div>
+              <pre>
+                {dashboard.reviewSummary ||
+                  '点“生成复盘草稿”后，会根据今天完成项、项目、暂存、提醒和复盘输入生成一段轻量复盘。'}
+              </pre>
+            </div>
+          </section>
+
+          <section className="review-archive-panel" aria-label="归档今天">
             <div>
-              <Sparkles size={17} />
-              <span>{summaryModeLabel}</span>
+              <span>{todayArchive ? '今天已归档' : '最后一步'}</span>
+              <strong>
+                {todayArchive
+                  ? `${todayArchive.date} · ${todayArchive.completedTasks.length} 项完成`
+                  : '确认无误后归档今天'}
+              </strong>
+              <small>
+                {latestArchive
+                  ? `最近归档：${latestArchive.date} · ${latestArchive.completedTasks.length} 项完成`
+                  : '还没有归档记录'}
+              </small>
             </div>
-            <pre>
-              {dashboard.reviewSummary ||
-                '点“生成总结”后，会根据今天完成项、项目、暂存、提醒和复盘输入生成一段轻量复盘。'}
-            </pre>
-          </div>
-          <div className="archive-strip">
-            <span>
-              {latestArchive
-                ? `最近归档：${latestArchive.date} · ${latestArchive.completedTasks.length} 项完成`
-                : '还没有归档记录'}
-            </span>
-            {dataNotice && <strong>{dataNotice}</strong>}
-          </div>
+            <button type="button" onClick={archiveToday}>
+              <Archive size={16} />
+              {todayArchive ? '更新今天归档' : '归档今天'}
+            </button>
+            {dataNotice && <em>{dataNotice}</em>}
+          </section>
+
+          <section className="archive-history" aria-label="最近归档">
+            <div className="review-section-heading">
+              <div>
+                <Archive size={17} />
+                <span>最近归档</span>
+              </div>
+              <small>{recentArchives.length ? `保留 ${dashboard.archives.length} 条` : '归档后会出现在这里'}</small>
+            </div>
+            {recentArchives.length ? (
+              <>
+                <div className="archive-list">
+                  {recentArchives.map((archive) => (
+                    <button
+                      type="button"
+                      key={archive.id}
+                      className={selectedArchive?.id === archive.id ? 'active' : ''}
+                      onClick={() => setExpandedArchiveId(archive.id)}
+                    >
+                      <span>{archive.date}</span>
+                      <strong>{archive.completedTasks.length} 完成</strong>
+                      <small>{archive.totalFocusMinutes} 分钟</small>
+                    </button>
+                  ))}
+                </div>
+                {selectedArchive && (
+                  <div className="archive-detail">
+                    <div className="archive-detail-head">
+                      <div>
+                        <span>{selectedArchive.date}</span>
+                        <strong>
+                          {selectedArchive.completedTasks.length} 项完成 · {selectedArchive.totalFocusMinutes} 分钟专注
+                        </strong>
+                      </div>
+                      <small>{new Date(selectedArchive.createdAt).toLocaleTimeString('zh-Hans-CN', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}</small>
+                    </div>
+                    <div className="archive-detail-grid">
+                      <div>
+                        <span>完成项</span>
+                        <p>
+                          {selectedArchive.completedTasks.map((task) => task.title).slice(0, 4).join('、') ||
+                            '没有完成项'}
+                        </p>
+                      </div>
+                      <div>
+                        <span>遗留项</span>
+                        <p>
+                          {selectedArchive.openTasks.map((task) => task.title).slice(0, 4).join('、') ||
+                            '没有遗留项'}
+                        </p>
+                      </div>
+                    </div>
+                    <pre>{selectedArchive.summary}</pre>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="archive-empty">完成一次复盘归档后，可以在这里翻看最近记录。</p>
+            )}
+          </section>
         </article>
       </section>
+      )}
 
       {commandOpen && (
         <div
@@ -1980,6 +2668,87 @@ function App() {
                 </button>
               ))}
               {!commandResults.length && <p>没有找到匹配项</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingFocusProject && (
+        <div
+          className="command-overlay focus-dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={() => setPendingFocusProjectId(null)}
+        >
+          <div className="focus-dialog" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="focus-dialog-head">
+              <div>
+                <span>项目专注</span>
+                <strong>{pendingFocusProject.name}</strong>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="关闭专注设置"
+                title="关闭"
+                onClick={() => setPendingFocusProjectId(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="focus-dialog-target">
+              <span>本轮目标</span>
+              <strong>{pendingFocusProject.nextAction}</strong>
+            </div>
+            <div className="focus-duration-presets" aria-label="选择专注时长">
+              {[15, 25, 30, 45, 60].map((minutes) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  className={pendingFocusMinutes === minutes ? 'active' : ''}
+                  onClick={() => setPendingFocusMinutes(minutes)}
+                >
+                  {minutes}
+                  <small>分钟</small>
+                </button>
+              ))}
+            </div>
+            <div className="focus-dialog-stepper">
+              <button
+                type="button"
+                title="减少 5 分钟"
+                onClick={() => setPendingFocusMinutes((minutes) => Math.max(5, minutes - 5))}
+              >
+                <Minus size={16} />
+              </button>
+              <div>
+                <strong>{pendingFocusMinutes}</strong>
+                <span>分钟</span>
+              </div>
+              <button
+                type="button"
+                title="增加 5 分钟"
+                onClick={() => setPendingFocusMinutes((minutes) => Math.min(120, minutes + 5))}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+            <div className="focus-dialog-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => setPendingFocusProjectId(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="primary-action"
+                onClick={startPendingProjectFocus}
+              >
+                <Play size={16} />
+                开始并切到聚焦
+              </button>
             </div>
           </div>
         </div>

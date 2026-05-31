@@ -69,6 +69,26 @@ function quitApp() {
   app.quit()
 }
 
+function isSafeExternalUrl(url) {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function isAppUrl(url) {
+  if (!url) return false
+  if (!isDev) return url.startsWith('file://')
+
+  try {
+    return new URL(url).origin === new URL(isDev).origin
+  } catch {
+    return false
+  }
+}
+
 function createTray() {
   if (tray) return tray
 
@@ -153,6 +173,7 @@ function createWindow() {
     autoHideMenuBar: true,
     icon: appIconPath,
     webPreferences: {
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
@@ -168,7 +189,9 @@ function createWindow() {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
     return { action: 'deny' }
   })
 
@@ -222,8 +245,14 @@ ipcMain.handle('ai:summary', async (_event, request) => {
 })
 
 app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(permission === 'geolocation')
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const isMainWindow =
+      Boolean(mainWindow) && webContents.id === mainWindow.webContents.id
+    callback(
+      permission === 'geolocation' &&
+        isMainWindow &&
+        isAppUrl(webContents.getURL()),
+    )
   })
 
   createWindow()

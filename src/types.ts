@@ -17,6 +17,7 @@ export type Project = {
   name: string
   nextAction: string
   minutes: number
+  focusSeconds: number
   active: boolean
 }
 
@@ -110,6 +111,8 @@ export type FocusSession = {
   durationMinutes: number
   projectId: string
   taskLabel: string
+  endsAt?: string
+  startedAt?: string
 }
 
 export type AiSettings = {

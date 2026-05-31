@@ -1,5 +1,6 @@
 import {
   CalendarClock,
+  FileText,
   Flame,
   Gauge,
   Globe2,
@@ -12,17 +13,26 @@ import {
   Zap,
 } from 'lucide-react'
 import type {
-  DailyQuote,
   AiProvider,
+  DailyArchive,
+  DailyQuote,
   DashboardState,
   DayMode,
+  InboxItem,
+  Project,
+  QuickLink,
   Quote,
+  Reminder,
   StoredDashboardState,
+  Task,
+  Theme,
 } from './types'
-import { dateAfter, todayIso, uid } from './utils'
+import { dateAfter, formatLocalDate, normalizeHttpUrl, todayIso, uid } from './utils'
 
 export const STORAGE_KEY = 'personal-command-dashboard-v1'
-export const QUOTE_POOL_VERSION = 2
+export const QUOTE_POOL_VERSION = 4
+
+const retiredDefaultQuoteIds = new Set(['quote-confucius-mountain'])
 
 export const defaultQuotes: Quote[] = [
   {
@@ -104,9 +114,9 @@ export const defaultQuotes: Quote[] = [
     enabled: true,
   },
   {
-    id: 'quote-confucius-mountain',
-    text: '移山的人，是从搬走小石头开始的。',
-    author: 'Confucius',
+    id: 'quote-deck-small-step',
+    text: '先推进能落地的一小步。',
+    author: 'Personal Command Deck',
     enabled: true,
   },
 ]
@@ -129,6 +139,29 @@ export const pickQuoteId = (quotes: Quote[], excludedId?: string) => {
 export const getQuoteById = (quotes: Quote[], quoteId: string) =>
   quotes.find((quote) => quote.id === quoteId && quote.enabled)
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const textValue = (value: unknown, fallback = '') =>
+  typeof value === 'string' ? value : fallback
+
+const trimmedText = (value: unknown, fallback = '') => textValue(value, fallback).trim()
+
+const booleanValue = (value: unknown, fallback = false) =>
+  typeof value === 'boolean' ? value : fallback
+
+const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
+  const number = typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  return Math.min(max, Math.max(min, Math.round(number)))
+}
+
+const isLocalDateString = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return formatLocalDate(date) === value
+}
+
 export const resolveDailyQuote = (
   quotePool: Quote[],
   dailyQuote?: Partial<DailyQuote>,
@@ -149,14 +182,21 @@ export const normalizeQuotes = (parsed: StoredDashboardState) => {
   const quotePool =
     Array.isArray(parsed.quotePool)
       ? parsed.quotePool
-          .map((quote) => ({
-            ...quote,
-            id: quote.id || uid(),
-            text: quote.text?.trim() ?? '',
-            author: quote.author?.trim() ?? '',
-            enabled: quote.enabled !== false,
-          }))
-          .filter((quote) => quote.text && quote.author)
+          .map((quote) => {
+            const item: Record<string, unknown> = isPlainObject(quote) ? quote : {}
+            return {
+              id: trimmedText(item.id) || uid(),
+              text: trimmedText(item.text),
+              author: trimmedText(item.author),
+              enabled: item.enabled !== false,
+            }
+          })
+          .filter(
+            (quote) =>
+              quote.text &&
+              quote.author &&
+              !retiredDefaultQuoteIds.has(quote.id),
+          )
       : defaultQuotes
 
   const existingQuoteIds = new Set(quotePool.map((quote) => quote.id))
@@ -216,6 +256,7 @@ export const defaultState: DashboardState = {
       name: '个人指挥台',
       nextAction: '把常用入口和今日面板调顺手',
       minutes: 0,
+      focusSeconds: 0,
       active: true,
     },
     {
@@ -223,6 +264,7 @@ export const defaultState: DashboardState = {
       name: '健身',
       nextAction: '安排下一次 30 分钟力量训练',
       minutes: 0,
+      focusSeconds: 0,
       active: true,
     },
     {
@@ -230,6 +272,7 @@ export const defaultState: DashboardState = {
       name: '写作',
       nextAction: '写一段关于本周状态的短笔记',
       minutes: 0,
+      focusSeconds: 0,
       active: true,
     },
   ],
@@ -297,7 +340,7 @@ export const linkIconOptions = [
   { value: 'zap', label: 'Zap', icon: <Zap size={15} /> },
   { value: 'mail', label: 'Mail', icon: <Mail size={15} /> },
   { value: 'calendar', label: 'Calendar', icon: <CalendarClock size={15} /> },
-  { value: 'doc', label: 'Docs', icon: <Pencil size={15} /> },
+  { value: 'doc', label: 'Docs', icon: <FileText size={15} /> },
 ]
 
 export const aiProviderOptions = [
@@ -326,31 +369,242 @@ export const aiProviderDefaults: Record<AiProvider, { baseUrl: string; model: st
   },
 }
 
+const validThemes = new Set<Theme>(['dark', 'clean', 'cyber', 'paper'])
+const validDayModes = new Set<DayMode>(['工作日', '周末', '冲刺', '摸鱼恢复'])
+const validProviders = new Set<AiProvider>(['openai', 'deepseek', 'moonshot', 'custom'])
+const validLinkIcons = new Set(linkIconOptions.map((option) => option.value))
+
+const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] => {
+  if (!Array.isArray(value)) return fallback
+  const tasks = value
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const title = trimmedText(item.title)
+      const kind = item.kind === 'top' || item.kind === 'todo' ? item.kind : 'todo'
+      if (!title) return null
+      return {
+        id: trimmedText(item.id) || uid(),
+        title,
+        done: booleanValue(item.done),
+        kind,
+      }
+    })
+    .filter((task): task is Task => Boolean(task))
+  return tasks.length ? tasks : fallback
+}
+
+const normalizeProjects = (value: unknown): Project[] => {
+  if (!Array.isArray(value)) return defaultState.projects
+  const projects = value
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const name = trimmedText(item.name)
+      if (!name) return null
+      return {
+        id: trimmedText(item.id) || uid(),
+        name,
+        nextAction: trimmedText(item.nextAction),
+        minutes: clampNumber(item.minutes, 0, 100_000, 0),
+        focusSeconds: clampNumber(
+          item.focusSeconds,
+          0,
+          100_000 * 60,
+          clampNumber(item.minutes, 0, 100_000, 0) * 60,
+        ),
+        active: item.active !== false,
+      }
+    })
+    .filter((project): project is Project => Boolean(project))
+  return projects.length ? projects : defaultState.projects
+}
+
+const normalizeQuickLinks = (value: unknown): QuickLink[] => {
+  if (!Array.isArray(value)) return defaultState.quickLinks
+  const links = value
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const label = trimmedText(item.label)
+      const url = normalizeHttpUrl(textValue(item.url))
+      const icon = trimmedText(item.icon, 'link')
+      if (!label || !url) return null
+      return {
+        id: trimmedText(item.id) || uid(),
+        label,
+        url,
+        icon: validLinkIcons.has(icon) ? icon : 'link',
+      }
+    })
+    .filter((link): link is QuickLink => Boolean(link))
+  return links.length ? links : defaultState.quickLinks
+}
+
+const normalizeInbox = (value: unknown, fallback = defaultState.inbox): InboxItem[] => {
+  if (!Array.isArray(value)) return fallback
+  return value
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const text = trimmedText(item.text)
+      if (!text) return null
+      return {
+        id: trimmedText(item.id) || uid(),
+        text,
+        createdAt: textValue(item.createdAt, new Date().toISOString()),
+      }
+    })
+    .filter((item): item is InboxItem => Boolean(item))
+}
+
+const normalizeReminders = (value: unknown): Reminder[] => {
+  if (!Array.isArray(value)) return defaultState.reminders
+  const reminders = value
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const title = trimmedText(item.title)
+      if (!title) return null
+      return {
+        id: trimmedText(item.id) || uid(),
+        title,
+        date: isLocalDateString(item.date) ? item.date : dateAfter(7),
+        type: trimmedText(item.type, 'Deadline') || 'Deadline',
+      }
+    })
+    .filter((reminder): reminder is Reminder => Boolean(reminder))
+  return reminders.length ? reminders : defaultState.reminders
+}
+
+const normalizeArchives = (value: unknown): DailyArchive[] => {
+  if (!Array.isArray(value)) return defaultState.archives
+  return value
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const date = isLocalDateString(item.date) ? item.date : todayIso()
+      return {
+        id: trimmedText(item.id) || uid(),
+        date,
+        createdAt: textValue(item.createdAt, new Date().toISOString()),
+        completedTasks: normalizeTasks(item.completedTasks, []).filter((task) => task.done),
+        openTasks: normalizeTasks(item.openTasks, []).filter((task) => !task.done),
+        inbox: normalizeInbox(item.inbox, []),
+        review: {
+          did: isPlainObject(item.review) ? textValue(item.review.did) : '',
+          stuck: isPlainObject(item.review) ? textValue(item.review.stuck) : '',
+          tomorrow: isPlainObject(item.review) ? textValue(item.review.tomorrow) : '',
+        },
+        summary: textValue(item.summary),
+        totalFocusMinutes: clampNumber(item.totalFocusMinutes, 0, 100_000, 0),
+      }
+    })
+    .filter((archive): archive is DailyArchive => Boolean(archive))
+    .slice(0, 60)
+}
+
+const normalizeWeather = (value: unknown): DashboardState['weather'] => {
+  if (!isPlainObject(value)) return defaultState.weather
+  return {
+    icon: textValue(value.icon, defaultState.weather.icon),
+    temp: textValue(value.temp, defaultState.weather.temp),
+    label: textValue(value.label, defaultState.weather.label),
+    condition: textValue(value.condition) || undefined,
+    humidity: textValue(value.humidity) || undefined,
+    latitude:
+      typeof value.latitude === 'number' && Number.isFinite(value.latitude)
+        ? value.latitude
+        : undefined,
+    longitude:
+      typeof value.longitude === 'number' && Number.isFinite(value.longitude)
+        ? value.longitude
+        : undefined,
+    updatedAt: textValue(value.updatedAt) || undefined,
+  }
+}
+
+export const normalizeDashboardState = (
+  input: StoredDashboardState | null | undefined,
+  options: { currentState?: DashboardState; preserveAiKey?: boolean } = {},
+): DashboardState => {
+  const parsed = isPlainObject(input) ? (input as StoredDashboardState) : {}
+  const quotes = normalizeQuotes(parsed)
+  const projects = normalizeProjects(parsed.projects)
+  const projectIds = new Set(projects.map((project) => project.id))
+  const durationMinutes = clampNumber(
+    parsed.focus?.durationMinutes,
+    5,
+    120,
+    defaultState.focus.durationMinutes,
+  )
+  const provider = validProviders.has(parsed.ai?.provider as AiProvider)
+    ? (parsed.ai?.provider as AiProvider)
+    : defaultState.ai.provider
+  const aiDefaults = aiProviderDefaults[provider]
+  const apiKey = options.preserveAiKey
+    ? (options.currentState?.ai.apiKey ?? defaultState.ai.apiKey)
+    : textValue(parsed.ai?.apiKey)
+
+  return {
+    quotePoolVersion: quotes.quotePoolVersion,
+    quotePool: quotes.quotePool,
+    dailyQuote: quotes.dailyQuote,
+    motto: undefined,
+    theme: validThemes.has(parsed.theme as Theme)
+      ? (parsed.theme as Theme)
+      : defaultState.theme,
+    dayMode: validDayModes.has(parsed.dayMode as DayMode)
+      ? (parsed.dayMode as DayMode)
+      : defaultState.dayMode,
+    energy: clampNumber(parsed.energy, 1, 5, defaultState.energy),
+    weather: normalizeWeather(parsed.weather),
+    currentFocus: textValue(parsed.currentFocus, defaultState.currentFocus),
+    tasks: normalizeTasks(parsed.tasks),
+    projects,
+    quickLinks: normalizeQuickLinks(parsed.quickLinks),
+    inbox: normalizeInbox(parsed.inbox),
+    reminders: normalizeReminders(parsed.reminders),
+    review: {
+      did: textValue(parsed.review?.did),
+      stuck: textValue(parsed.review?.stuck),
+      tomorrow: textValue(parsed.review?.tomorrow),
+    },
+    reviewSummary: textValue(parsed.reviewSummary),
+    ai: {
+      enabled: booleanValue(parsed.ai?.enabled),
+      provider,
+      apiKey,
+      baseUrl: textValue(parsed.ai?.baseUrl, aiDefaults.baseUrl),
+      model: textValue(parsed.ai?.model, aiDefaults.model),
+    },
+    archives: normalizeArchives(parsed.archives),
+    focus: {
+      running: false,
+      durationMinutes,
+      secondsLeft: clampNumber(
+        parsed.focus?.secondsLeft,
+        0,
+        durationMinutes * 60,
+        durationMinutes * 60,
+      ),
+      projectId:
+        textValue(parsed.focus?.projectId) && projectIds.has(textValue(parsed.focus?.projectId))
+          ? textValue(parsed.focus?.projectId)
+          : '',
+      taskLabel: textValue(parsed.focus?.taskLabel),
+      endsAt: undefined,
+      startedAt: undefined,
+    },
+  }
+}
+
+export const createBackupState = (dashboard: DashboardState): DashboardState => ({
+  ...dashboard,
+  focus: { ...dashboard.focus, running: false, endsAt: undefined, startedAt: undefined },
+  ai: { ...dashboard.ai, apiKey: '' },
+})
+
 export function loadState(): DashboardState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return defaultState
     const parsed = JSON.parse(raw) as StoredDashboardState
-    const quotes = normalizeQuotes(parsed)
-    return {
-      ...defaultState,
-      ...parsed,
-      motto: undefined,
-      ...quotes,
-      weather: { ...defaultState.weather, ...parsed.weather },
-      focus: { ...defaultState.focus, ...parsed.focus, running: false },
-      review: { ...defaultState.review, ...parsed.review },
-      ai: { ...defaultState.ai, ...parsed.ai },
-      tasks: parsed.tasks?.length ? parsed.tasks : defaultState.tasks,
-      projects: parsed.projects?.length ? parsed.projects : defaultState.projects,
-      quickLinks: parsed.quickLinks?.length
-        ? parsed.quickLinks
-        : defaultState.quickLinks,
-      reminders: parsed.reminders?.length ? parsed.reminders : defaultState.reminders,
-      inbox: parsed.inbox ?? defaultState.inbox,
-      archives: parsed.archives ?? defaultState.archives,
-      reviewSummary: parsed.reviewSummary ?? defaultState.reviewSummary,
-    }
+    return normalizeDashboardState(parsed)
   } catch {
     return defaultState
   }
