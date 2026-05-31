@@ -3,6 +3,9 @@ import type {
   AiSummaryRequest,
   AiSummaryResponse,
   DashboardState,
+  DesktopSettings,
+  GlobalShortcutSettings,
+  GlobalShortcutStatus,
 } from './types'
 import { daysUntil, todayIso } from './utils'
 
@@ -10,6 +13,16 @@ declare global {
   interface Window {
     commandDeck?: {
       generateAiSummary: (request: AiSummaryRequest) => Promise<AiSummaryResponse>
+      getDesktopSettings: () => Promise<{
+        settings: DesktopSettings
+        shortcut: GlobalShortcutStatus
+      }>
+      updateGlobalShortcut: (
+        request: GlobalShortcutSettings,
+      ) => Promise<{
+        settings: DesktopSettings
+        shortcut: GlobalShortcutStatus
+      }>
     }
   }
 }
@@ -29,6 +42,9 @@ export const buildReviewPrompt = (dashboard: DashboardState) => {
       `${project.name}：下一步 ${project.nextAction || '未填写'}，累计 ${project.minutes} 分钟`,
   )
   const inbox = dashboard.inbox.map((item) => item.text)
+  const tomorrowTasks = dashboard.tomorrowTasks.map(
+    (task) => `${task.kind === 'top' ? 'Top 3' : '待办'}：${task.title}`,
+  )
   const reminders = dashboard.reminders
     .slice()
     .sort((a, b) => daysUntil(a.date) - daysUntil(b.date))
@@ -56,6 +72,9 @@ export const buildReviewPrompt = (dashboard: DashboardState) => {
     `- 今天做了什么：${dashboard.review.did.trim() || '未填写'}`,
     `- 卡在哪里：${dashboard.review.stuck.trim() || '未填写'}`,
     `- 明天第一件事：${dashboard.review.tomorrow.trim() || '未填写'}`,
+    '',
+    '已布置的明日任务：',
+    listLines(tomorrowTasks, '暂无明日任务'),
     '',
     '已完成任务：',
     listLines(completedTasks, '暂无已完成任务'),

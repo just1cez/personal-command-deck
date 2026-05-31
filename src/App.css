@@ -236,6 +236,7 @@
 
 .energy-control,
 .mode-control,
+.shortcut-settings,
 .data-actions,
 .command-trigger {
   align-items: center;
@@ -480,6 +481,81 @@
 .command-trigger {
   cursor: pointer;
   margin-left: auto;
+}
+
+.shortcut-settings {
+  gap: 7px;
+  padding: 0 7px;
+}
+
+.shortcut-toggle {
+  align-items: center;
+  color: var(--heading);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.shortcut-toggle input {
+  accent-color: var(--accent);
+  height: 15px;
+  margin: 0;
+  width: 15px;
+}
+
+.shortcut-settings > input {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--heading);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  height: 30px;
+  min-width: 210px;
+  padding: 0 9px;
+}
+
+.shortcut-settings button {
+  align-items: center;
+  background: transparent;
+  border-radius: 7px;
+  color: var(--heading);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.shortcut-settings button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.shortcut-settings button:disabled,
+.shortcut-settings input:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.shortcut-settings small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-settings small.ok {
+  color: var(--accent);
 }
 
 .data-actions {
@@ -1672,6 +1748,62 @@ button {
   padding: 0 9px;
 }
 
+.retention-settings {
+  align-items: center;
+  background: color-mix(in srgb, var(--panel) 64%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--border-strong) 78%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) minmax(104px, auto);
+  padding: 10px;
+}
+
+.retention-settings.compact {
+  grid-template-columns: minmax(0, 1fr) minmax(112px, auto) minmax(82px, auto);
+}
+
+.retention-settings > div,
+.retention-settings label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.retention-settings span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.retention-settings strong {
+  color: var(--heading);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.retention-settings small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.retention-settings select,
+.retention-settings input {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--heading);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  height: 34px;
+  min-width: 0;
+  padding: 0 9px;
+}
+
 .project-form {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2271,6 +2403,7 @@ button {
 
 .review-receipt,
 .review-flow,
+.tomorrow-plan,
 .review-draft,
 .review-archive-panel,
 .archive-history {
@@ -2406,6 +2539,69 @@ button {
 .review-grid textarea {
   background: var(--input);
   min-height: 116px;
+}
+
+.tomorrow-plan {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 62%),
+    var(--surface);
+}
+
+.tomorrow-task-form {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.tomorrow-task-form button,
+.tomorrow-plan-actions button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--heading);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 6px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.tomorrow-task-form button:hover,
+.tomorrow-plan-actions button:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  color: var(--accent);
+}
+
+.tomorrow-task-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tomorrow-task-list {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tomorrow-plan-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.tomorrow-plan-actions span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .review-actions {
@@ -2746,9 +2942,20 @@ button {
 
 .archive-detail-head small {
   color: var(--muted);
-  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 850;
+}
+
+.archive-detail-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.archive-detail-actions .icon-button {
+  height: 30px;
+  width: 30px;
 }
 
 .archive-detail-grid {
@@ -3302,6 +3509,7 @@ button {
   .start-view,
   .execute-view,
   .review-grid,
+  .tomorrow-task-form,
   .review-receipt-grid,
   .archive-detail-grid,
   .archive-list,
@@ -3367,6 +3575,15 @@ button {
     width: 100%;
   }
 
+  .shortcut-settings {
+    width: 100%;
+  }
+
+  .shortcut-settings > input {
+    flex: 1;
+    min-width: 0;
+  }
+
   .data-actions > span {
     flex: 1 0 100%;
     text-align: center;
@@ -3382,6 +3599,7 @@ button {
   .focus-signals,
   .ai-settings-grid,
   .project-form,
+  .retention-settings,
   .link-form,
   .reminder-form,
   .reminder-form-row,
@@ -3421,13 +3639,15 @@ button {
   .ai-settings-head,
   .ai-settings-note,
   .review-section-heading,
-  .review-actions {
+  .review-actions,
+  .tomorrow-plan-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
   .review-actions button,
-  .review-archive-panel button {
+  .review-archive-panel button,
+  .tomorrow-plan-actions button {
     justify-content: center;
     width: 100%;
   }

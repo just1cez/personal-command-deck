@@ -43,6 +43,7 @@ import type {
   DailyReview,
   DashboardBackup,
   DashboardState,
+  GlobalShortcutStatus,
   Project,
   Quote,
   QuickLink,
@@ -137,6 +138,7 @@ const recognizableStateKeys = new Set([
   'weather',
   'currentFocus',
   'tasks',
+  'tomorrowTasks',
   'projects',
   'quickLinks',
   'inbox',
@@ -144,6 +146,7 @@ const recognizableStateKeys = new Set([
   'review',
   'reviewSummary',
   'ai',
+  'retention',
   'archives',
   'focus',
 ])
@@ -198,6 +201,37 @@ const getFocusSegmentSeconds = (startedAt?: string, endsAt?: string) => {
 
 const secondsToDisplayMinutes = (seconds: number) => Math.floor(seconds / 60)
 
+const retentionOptions = [
+  { value: '0', label: '永久保留' },
+  { value: '30', label: '30 天' },
+  { value: '90', label: '90 天' },
+  { value: '180', label: '180 天' },
+  { value: '365', label: '1 年' },
+]
+
+const defaultShortcutStatus: GlobalShortcutStatus = {
+  enabled: false,
+  accelerator: 'CommandOrControl+Shift+Space',
+  registered: false,
+  message: '桌面版可用',
+}
+
+const clampRetentionDays = (days: number) =>
+  Number.isFinite(days) ? Math.min(3650, Math.max(0, Math.round(days))) : 0
+
+const getRetentionLabel = (days: number) => (days <= 0 ? '永久保留' : `${days} 天`)
+
+const isWithinRetentionWindow = (
+  isoDateTime: string | undefined,
+  days: number,
+  now = Date.now(),
+) => {
+  if (days <= 0) return true
+  const time = isoDateTime ? new Date(isoDateTime).getTime() : NaN
+  if (!Number.isFinite(time)) return true
+  return now - time <= days * 86_400_000
+}
+
 const getTotalFocusMinutes = (projects: Project[]) =>
   projects.reduce(
     (total, project) =>
@@ -243,7 +277,7 @@ const buildArchive = (current: DashboardState): DailyArchive => {
   const open = current.tasks.filter((task) => !task.done)
   const summary =
     current.reviewSummary ||
-    buildLocalSummary(current.review, completed, open, current.inbox)
+    buildLocalSummary(current.review, completed, open, current.inbox, current.tomorrowTasks)
 
   return {
     id: uid(),
@@ -251,6 +285,7 @@ const buildArchive = (current: DashboardState): DailyArchive => {
     createdAt: new Date().toISOString(),
     completedTasks: completed,
     openTasks: open,
+    tomorrowTasks: current.tomorrowTasks,
     inbox: current.inbox,
     review: current.review,
     summary,
@@ -264,8 +299,14 @@ function App() {
   const [now, setNow] = useState(() => new Date())
   const [newTopTask, setNewTopTask] = useState('')
   const [newTodo, setNewTodo] = useState('')
+  const [newTomorrowTask, setNewTomorrowTask] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectAction, setNewProjectAction] = useState('')
+  const [shortcutStatus, setShortcutStatus] =
+    useState<GlobalShortcutStatus>(defaultShortcutStatus)
+  const [shortcutInput, setShortcutInput] = useState(defaultShortcutStatus.accelerator)
+  const [shortcutLoading, setShortcutLoading] = useState(false)
+  const [shortcutNotice, setShortcutNotice] = useState('')
   const [newInboxText, setNewInboxText] = useState('')
   const [newLinkLabel, setNewLinkLabel] = useState('')
   const [newLinkUrl, setNewLinkUrl] = useState('')
@@ -334,6 +375,30 @@ function App() {
   }, [dashboard])
 
   useEffect(() => {
+    let cancelled = false
+    const loadDesktopSettings = async () => {
+      if (!window.commandDeck?.getDesktopSettings) {
+        setShortcutNotice('快捷键设置仅在桌面版可用')
+        return
+      }
+      try {
+        const response = await window.commandDeck.getDesktopSettings()
+        if (cancelled) return
+        setShortcutStatus(response.shortcut)
+        setShortcutInput(response.shortcut.accelerator)
+        setShortcutNotice(response.shortcut.message)
+      } catch {
+        if (!cancelled) setShortcutNotice('快捷键设置读取失败')
+      }
+    }
+
+    void loadDesktopSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 1000)
     return () => window.clearInterval(interval)
   }, [])
@@ -383,6 +448,40 @@ function App() {
     const interval = window.setInterval(syncFocusClock, 1000)
     return () => window.clearInterval(interval)
   }, [dashboard.focus.running])
+
+  const pruneExpiredRecords = useCallback(() => {
+    updateDashboard((current) => {
+      const nowTime = Date.now()
+      const archives = current.archives.filter((archive) =>
+        isWithinRetentionWindow(
+          archive.createdAt,
+          current.retention.reviewArchiveDays,
+          nowTime,
+        ),
+      )
+      const projects = current.projects.filter(
+        (project) =>
+          project.active !== false ||
+          isWithinRetentionWindow(
+            project.completedAt,
+            current.retention.completedProjectDays,
+            nowTime,
+          ),
+      )
+      if (
+        archives.length === current.archives.length &&
+        projects.length === current.projects.length
+      ) {
+        return current
+      }
+      return { ...current, archives, projects }
+    })
+  }, [updateDashboard])
+
+  useEffect(() => {
+    const interval = window.setInterval(pruneExpiredRecords, 3_600_000)
+    return () => window.clearInterval(interval)
+  }, [pruneExpiredRecords])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -780,6 +879,78 @@ function App() {
     }))
   }
 
+  const addTomorrowTask = () => {
+    const title = newTomorrowTask.trim()
+    if (!title) return
+    updateDashboard((current) => ({
+      ...current,
+      tomorrowTasks: [
+        ...current.tomorrowTasks,
+        { id: uid(), title, done: false, kind: 'todo' },
+      ],
+    }))
+    setNewTomorrowTask('')
+  }
+
+  const toggleTomorrowTask = (id: string) => {
+    updateDashboard((current) => ({
+      ...current,
+      tomorrowTasks: current.tomorrowTasks.map((task) =>
+        task.id === id ? { ...task, done: !task.done } : task,
+      ),
+    }))
+  }
+
+  const removeTomorrowTask = (id: string) => {
+    updateDashboard((current) => ({
+      ...current,
+      tomorrowTasks: current.tomorrowTasks.filter((task) => task.id !== id),
+    }))
+  }
+
+  const moveTomorrowTask = (id: string, direction: 'up' | 'down') => {
+    let moved = false
+    updateDashboard((current) => {
+      const index = current.tomorrowTasks.findIndex((task) => task.id === id)
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.tomorrowTasks.length) {
+        return current
+      }
+      const tomorrowTasks = [...current.tomorrowTasks]
+      ;[tomorrowTasks[index], tomorrowTasks[targetIndex]] = [
+        tomorrowTasks[targetIndex],
+        tomorrowTasks[index],
+      ]
+      moved = true
+      return { ...current, tomorrowTasks }
+    })
+    if (moved) markOrderMove(id, direction)
+  }
+
+  const promoteTomorrowTasks = () => {
+    updateDashboard((current) => {
+      const openTopSlots = Math.max(
+        0,
+        3 - current.tasks.filter((item) => item.kind === 'top').length,
+      )
+      const carriedTasks = current.tomorrowTasks
+        .filter((task) => task.title.trim())
+        .map((task, index) => ({
+          id: uid(),
+          title: task.title.trim(),
+          done: false,
+          kind: index < openTopSlots ? ('top' as const) : ('todo' as const),
+        }))
+      if (!carriedTasks.length) return current
+      return {
+        ...current,
+        tasks: [...current.tasks, ...carriedTasks],
+        tomorrowTasks: [],
+      }
+    })
+    setDataNotice('已把明日任务带入今日任务')
+  }
+
   const moveTaskWithinKind = (id: string, direction: 'up' | 'down') => {
     let moved = false
     updateDashboard((current) => {
@@ -875,6 +1046,7 @@ function App() {
             ? {
                 ...addFocusSecondsToProject(project, elapsedSeconds),
                 active: false,
+                completedAt: new Date().toISOString(),
               }
             : project,
         ),
@@ -903,7 +1075,7 @@ function App() {
     updateDashboard((current) => ({
       ...current,
       projects: current.projects.map((project) =>
-        project.id === id ? { ...project, active: true } : project,
+        project.id === id ? { ...project, active: true, completedAt: undefined } : project,
       ),
     }))
   }
@@ -1261,6 +1433,72 @@ function App() {
     setAiError('')
   }
 
+  const saveRetentionInput = (
+    key: keyof DashboardState['retention'],
+    value: string,
+  ) => {
+    const days = clampRetentionDays(Number(value))
+    updateDashboard((current) => {
+      const retention = { ...current.retention, [key]: days }
+      const nowTime = Date.now()
+      return {
+        ...current,
+        retention,
+        archives: current.archives.filter((archive) =>
+          isWithinRetentionWindow(archive.createdAt, retention.reviewArchiveDays, nowTime),
+        ),
+        projects: current.projects.filter(
+          (project) =>
+            project.active !== false ||
+            isWithinRetentionWindow(
+              project.completedAt,
+              retention.completedProjectDays,
+              nowTime,
+            ),
+        ),
+      }
+    })
+    setDataNotice(
+      days <= 0
+        ? '已设置为永久保留'
+        : `已设置为保留 ${days} 天，超出时间的本机记录会自动清理`,
+    )
+  }
+
+  const deleteArchive = (id: string) => {
+    const archive = dashboard.archives.find((item) => item.id === id)
+    if (!archive) return
+    const confirmed = window.confirm(`删除 ${archive.date} 的每日复盘归档？此操作只影响本机数据。`)
+    if (!confirmed) return
+    updateDashboard((current) => ({
+      ...current,
+      archives: current.archives.filter((item) => item.id !== id),
+    }))
+    setExpandedArchiveId((current) => (current === id ? null : current))
+    setDataNotice('已删除这条复盘归档')
+  }
+
+  const saveGlobalShortcut = async (enabled = shortcutStatus.enabled) => {
+    if (!window.commandDeck?.updateGlobalShortcut) {
+      setShortcutNotice('快捷键设置仅在桌面版可用')
+      return
+    }
+    setShortcutLoading(true)
+    try {
+      const response = await window.commandDeck.updateGlobalShortcut({
+        enabled,
+        accelerator: shortcutInput.trim(),
+      })
+      setShortcutStatus(response.shortcut)
+      setShortcutInput(response.shortcut.accelerator)
+      setShortcutNotice(response.shortcut.message)
+    } catch (error) {
+      setShortcutNotice(error instanceof Error ? error.message : '快捷键保存失败')
+    } finally {
+      setShortcutLoading(false)
+    }
+  }
+
   const setAiProvider = (provider: AiProvider) => {
     updateDashboard((current) => {
       const preset = aiProviderDefaults[provider]
@@ -1284,7 +1522,13 @@ function App() {
         const open = current.tasks.filter((task) => !task.done)
         return {
           ...current,
-          reviewSummary: buildLocalSummary(current.review, completed, open, current.inbox),
+          reviewSummary: buildLocalSummary(
+            current.review,
+            completed,
+            open,
+            current.inbox,
+            current.tomorrowTasks,
+          ),
         }
       })
       setAiError('')
@@ -1548,6 +1792,49 @@ function App() {
             }))
           }
         />
+
+        <div className="shortcut-settings" aria-label="托盘呼出快捷键">
+          <label className="shortcut-toggle">
+            <input
+              type="checkbox"
+              checked={shortcutStatus.enabled}
+              disabled={!window.commandDeck?.updateGlobalShortcut || shortcutLoading}
+              onChange={(event) => {
+                const enabled = event.target.checked
+                setShortcutStatus((current) => ({ ...current, enabled }))
+                void saveGlobalShortcut(enabled)
+              }}
+            />
+            <span>呼出</span>
+          </label>
+          <input
+            value={shortcutInput}
+            aria-label="全局呼出快捷键"
+            placeholder="CommandOrControl+Shift+Space"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            disabled={!window.commandDeck?.updateGlobalShortcut || shortcutLoading}
+            onChange={(event) => setShortcutInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                void saveGlobalShortcut()
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={!window.commandDeck?.updateGlobalShortcut || shortcutLoading}
+            title="保存托盘呼出快捷键"
+            onClick={() => void saveGlobalShortcut()}
+          >
+            <Command size={15} />
+            保存
+          </button>
+          <small className={shortcutStatus.registered ? 'ok' : ''}>
+            {shortcutNotice || (shortcutStatus.registered ? '已启用' : '未启用')}
+          </small>
+        </div>
 
         <div className="data-actions" aria-label="本地数据">
           <span>本地备份</span>
@@ -2119,6 +2406,44 @@ function App() {
                 <span>已结项 {completedProjects.length}</span>
                 <small>{showCompletedProjects ? '收起' : '展开'}</small>
               </button>
+              <div className="retention-settings compact" aria-label="已结项项目清理设置">
+                <div>
+                  <span>本机清理</span>
+                  <strong>已结项项目 {getRetentionLabel(dashboard.retention.completedProjectDays)}</strong>
+                </div>
+                <label>
+                  <span>保留</span>
+                  <select
+                    value={dashboard.retention.completedProjectDays}
+                    onChange={(event) =>
+                      saveRetentionInput('completedProjectDays', event.target.value)
+                    }
+                  >
+                    {retentionOptions.map((option) => (
+                      <option value={option.value} key={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>天数</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="3650"
+                    value={dashboard.retention.completedProjectDays}
+                    onChange={(event) =>
+                      saveRetentionInput('completedProjectDays', event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.currentTarget.blur()
+                      }
+                    }}
+                  />
+                </label>
+              </div>
               {showCompletedProjects && (
                 <div className="completed-project-list">
                   {completedProjects.map((project) => (
@@ -2126,7 +2451,12 @@ function App() {
                       <div>
                         <strong>{project.name}</strong>
                         <span>{project.nextAction || '没有记录下一步动作'}</span>
-                        <small>{project.minutes} 分钟已记录</small>
+                        <small>
+                          {project.minutes} 分钟已记录
+                          {project.completedAt
+                            ? ` · ${new Date(project.completedAt).toLocaleDateString('zh-Hans-CN')} 结项`
+                            : ''}
+                        </small>
                       </div>
                       <button
                         type="button"
@@ -2408,6 +2738,67 @@ function App() {
             </div>
           </section>
 
+          <section className="tomorrow-plan" aria-label="布置第二天任务">
+            <div className="review-section-heading">
+              <div>
+                <CalendarClock size={17} />
+                <span>布置第二天任务</span>
+              </div>
+              <small>
+                {dashboard.tomorrowTasks.length
+                  ? `${dashboard.tomorrowTasks.length} 项`
+                  : '归档时会一起保存'}
+              </small>
+            </div>
+            <form
+              className="tomorrow-task-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                addTomorrowTask()
+              }}
+            >
+              <input
+                value={newTomorrowTask}
+                placeholder="写下明天打开后先处理的任务"
+                onChange={(event) => setNewTomorrowTask(event.target.value)}
+              />
+              <button type="submit" disabled={!newTomorrowTask.trim()}>
+                <Plus size={15} />
+                添加
+              </button>
+            </form>
+            {dashboard.tomorrowTasks.length ? (
+              <>
+                <ul className="tomorrow-task-list">
+                  {dashboard.tomorrowTasks.map((task, index) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      orderMoveDirection={
+                        movedOrderItem?.id === task.id ? movedOrderItem.direction : undefined
+                      }
+                      onToggle={() => toggleTomorrowTask(task.id)}
+                      onRemove={() => removeTomorrowTask(task.id)}
+                      onMoveUp={() => moveTomorrowTask(task.id, 'up')}
+                      onMoveDown={() => moveTomorrowTask(task.id, 'down')}
+                      canMoveUp={index > 0}
+                      canMoveDown={index < dashboard.tomorrowTasks.length - 1}
+                    />
+                  ))}
+                </ul>
+                <div className="tomorrow-plan-actions">
+                  <span>明天打开时，也可以一键带入今日任务。</span>
+                  <button type="button" className="secondary-action" onClick={promoteTomorrowTasks}>
+                    <SquareCheckBig size={15} />
+                    带入今日任务
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="archive-empty">不需要排满，留一两件醒来就能开始的事。</p>
+            )}
+          </section>
+
           <section className="review-draft" aria-label="AI 复盘草稿">
             <div className="review-section-heading">
               <div>
@@ -2562,7 +2953,50 @@ function App() {
                 <Archive size={17} />
                 <span>最近归档</span>
               </div>
-              <small>{recentArchives.length ? `保留 ${dashboard.archives.length} 条` : '归档后会出现在这里'}</small>
+              <small>
+                {recentArchives.length
+                  ? `保留 ${dashboard.archives.length} 条 · ${getRetentionLabel(dashboard.retention.reviewArchiveDays)}`
+                  : '归档后会出现在这里'}
+              </small>
+            </div>
+            <div className="retention-settings" aria-label="归档清理设置">
+              <div>
+                <span>本机清理</span>
+                <strong>每日复盘 {getRetentionLabel(dashboard.retention.reviewArchiveDays)}</strong>
+                <small>导出文件不受应用管理；这里仅清理本机归档记录。</small>
+              </div>
+              <label>
+                <span>复盘归档</span>
+                <select
+                  value={dashboard.retention.reviewArchiveDays}
+                  onChange={(event) =>
+                    saveRetentionInput('reviewArchiveDays', event.target.value)
+                  }
+                >
+                  {retentionOptions.map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>自定义天数</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="3650"
+                  value={dashboard.retention.reviewArchiveDays}
+                  onChange={(event) =>
+                    saveRetentionInput('reviewArchiveDays', event.target.value)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+              </label>
             </div>
             {recentArchives.length ? (
               <>
@@ -2581,19 +3015,30 @@ function App() {
                   ))}
                 </div>
                 {selectedArchive && (
-                  <div className="archive-detail">
-                    <div className="archive-detail-head">
-                      <div>
-                        <span>{selectedArchive.date}</span>
-                        <strong>
-                          {selectedArchive.completedTasks.length} 项完成 · {selectedArchive.totalFocusMinutes} 分钟专注
-                        </strong>
+                    <div className="archive-detail">
+                      <div className="archive-detail-head">
+                        <div>
+                          <span>{selectedArchive.date}</span>
+                          <strong>
+                            {selectedArchive.completedTasks.length} 项完成 · {selectedArchive.totalFocusMinutes} 分钟专注
+                          </strong>
+                        </div>
+                        <div className="archive-detail-actions">
+                          <small>{new Date(selectedArchive.createdAt).toLocaleTimeString('zh-Hans-CN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}</small>
+                          <button
+                            type="button"
+                            className="icon-button danger"
+                            title="删除这条复盘归档"
+                            aria-label="删除这条复盘归档"
+                            onClick={() => deleteArchive(selectedArchive.id)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
-                      <small>{new Date(selectedArchive.createdAt).toLocaleTimeString('zh-Hans-CN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}</small>
-                    </div>
                     <div className="archive-detail-grid">
                       <div>
                         <span>完成项</span>
@@ -2607,6 +3052,13 @@ function App() {
                         <p>
                           {selectedArchive.openTasks.map((task) => task.title).slice(0, 4).join('、') ||
                             '没有遗留项'}
+                        </p>
+                      </div>
+                      <div>
+                        <span>明日任务</span>
+                        <p>
+                          {selectedArchive.tomorrowTasks.map((task) => task.title).slice(0, 4).join('、') ||
+                            '没有布置'}
                         </p>
                       </div>
                     </div>

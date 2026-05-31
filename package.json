@@ -1,7 +1,7 @@
 {
   "name": "personal-command-deck",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A lightweight local personal command dashboard.",
   "author": "syf14",
   "license": "MIT",

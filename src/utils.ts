@@ -69,6 +69,7 @@ export const buildLocalSummary = (
   completedTasks: Task[],
   openTasks: Task[],
   inbox: InboxItem[],
+  tomorrowTasks: Task[] = [],
 ) => {
   const did =
     review.did.trim() ||
@@ -78,6 +79,8 @@ export const buildLocalSummary = (
   const stuck = review.stuck.trim() || '没有记录明显卡点'
   const tomorrow =
     review.tomorrow.trim() ||
+    tomorrowTasks.find((task) => !task.done)?.title ||
+    tomorrowTasks[0]?.title ||
     openTasks[0]?.title ||
     inbox[0]?.text ||
     '先写下明天醒来能直接开始的一小步'
@@ -86,7 +89,11 @@ export const buildLocalSummary = (
     `今日推进：${did}`,
     `卡点观察：${stuck}`,
     `明天第一步：${tomorrow}`,
+    tomorrowTasks.length
+      ? `明日任务：${tomorrowTasks.map((task) => task.title).join('；')}`
+      : '',
   ].join('\n')
+    .trim()
 }
 
 export const formatTime = (date: Date) =>

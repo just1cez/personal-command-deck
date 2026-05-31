@@ -4,6 +4,7 @@ const {
   Menu,
   Tray,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   session,
@@ -20,10 +21,18 @@ let mainWindow = null
 let tray = null
 let isQuitting = false
 let closeDialogOpen = false
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
 const defaultSettings = {
   closeBehavior: 'ask',
+  globalShortcut: {
+    enabled: true,
+    accelerator: 'CommandOrControl+Shift+Space',
+  },
 }
+
+let registeredShortcut = ''
+let shortcutMessage = ''
 
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json')
@@ -32,21 +41,129 @@ function getSettingsPath() {
 function readSettings() {
   try {
     const settings = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'))
-    if (['ask', 'tray', 'quit'].includes(settings.closeBehavior)) {
-      return { ...defaultSettings, ...settings }
+    if (settings && typeof settings === 'object') {
+      return normalizeSettings(settings)
     }
   } catch {
     // Fall back to asking when the file is missing or malformed.
   }
-  return defaultSettings
+  return normalizeSettings({})
 }
 
 function writeSettings(settings) {
+  const normalized = normalizeSettings(settings)
   fs.mkdirSync(app.getPath('userData'), { recursive: true })
   fs.writeFileSync(
     getSettingsPath(),
-    JSON.stringify({ ...defaultSettings, ...settings }, null, 2),
+    JSON.stringify(normalized, null, 2),
   )
+  return normalized
+}
+
+function normalizeSettings(settings) {
+  const closeBehavior = ['ask', 'tray', 'quit'].includes(settings.closeBehavior)
+    ? settings.closeBehavior
+    : defaultSettings.closeBehavior
+  const shortcut =
+    settings.globalShortcut && typeof settings.globalShortcut === 'object'
+      ? settings.globalShortcut
+      : {}
+  const accelerator =
+    typeof shortcut.accelerator === 'string'
+      ? shortcut.accelerator.trim()
+      : defaultSettings.globalShortcut.accelerator
+
+  return {
+    closeBehavior,
+    globalShortcut: {
+      enabled:
+        typeof shortcut.enabled === 'boolean'
+          ? shortcut.enabled
+          : defaultSettings.globalShortcut.enabled,
+      accelerator: isSafeAccelerator(accelerator)
+        ? accelerator
+        : defaultSettings.globalShortcut.accelerator,
+    },
+  }
+}
+
+function isSafeAccelerator(accelerator) {
+  if (typeof accelerator !== 'string') return false
+  const value = accelerator.trim()
+  if (value.length < 3 || value.length > 80) return false
+  if (!/^[A-Za-z0-9+\-_=,[\]./;`'\\ ]+$/.test(value)) return false
+
+  const parts = value
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length < 2 || parts.length > 5) return false
+
+  const modifiers = new Set([
+    'CommandOrControl',
+    'CmdOrCtrl',
+    'Command',
+    'Control',
+    'Ctrl',
+    'Alt',
+    'Option',
+    'AltGr',
+    'Shift',
+    'Super',
+    'Meta',
+  ])
+  const keyPattern =
+    /^(Space|Tab|Enter|Return|Escape|Esc|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Plus|Minus|F(?:[1-9]|1[0-9]|2[0-4])|[A-Z0-9]|[,\-_=.[\]/;`'\\])$/i
+  const key = parts[parts.length - 1]
+  const modifierParts = parts.slice(0, -1)
+  return (
+    modifierParts.length > 0 &&
+    modifierParts.every((part) => modifiers.has(part)) &&
+    keyPattern.test(key)
+  )
+}
+
+function registerGlobalShortcut(settings = readSettings()) {
+  globalShortcut.unregisterAll()
+  registeredShortcut = ''
+
+  const shortcut = settings.globalShortcut
+  if (!shortcut.enabled) {
+    shortcutMessage = '快捷键已关闭'
+    return { ...shortcut, registered: false, message: '快捷键已关闭' }
+  }
+  if (!isSafeAccelerator(shortcut.accelerator)) {
+    shortcutMessage = '快捷键格式不可用'
+    return { ...shortcut, registered: false, message: '快捷键格式不可用' }
+  }
+
+  const registered = globalShortcut.register(shortcut.accelerator, showMainWindow)
+  registeredShortcut = registered ? shortcut.accelerator : ''
+  shortcutMessage = registered ? '快捷键已启用' : '快捷键被系统或其他应用占用'
+  return {
+    ...shortcut,
+    registered,
+    message: shortcutMessage,
+  }
+}
+
+function getShortcutStatus(settings = readSettings()) {
+  const shortcut = settings.globalShortcut
+  const registered =
+    Boolean(registeredShortcut) &&
+    registeredShortcut === shortcut.accelerator &&
+    globalShortcut.isRegistered(shortcut.accelerator)
+  return {
+    ...shortcut,
+    registered,
+    message:
+      shortcutMessage ||
+      (shortcut.enabled
+        ? registered
+          ? '快捷键已启用'
+          : '快捷键尚未注册'
+        : '快捷键已关闭'),
+  }
 }
 
 function showMainWindow() {
@@ -149,10 +266,10 @@ async function handleWindowClose(event) {
   closeDialogOpen = false
 
   if (result.checkboxChecked && result.response === 0) {
-    writeSettings({ closeBehavior: 'tray' })
+    writeSettings({ ...settings, closeBehavior: 'tray' })
   }
   if (result.checkboxChecked && result.response === 1) {
-    writeSettings({ closeBehavior: 'quit' })
+    writeSettings({ ...settings, closeBehavior: 'quit' })
   }
 
   if (result.response === 0) {
@@ -244,24 +361,79 @@ ipcMain.handle('ai:summary', async (_event, request) => {
   return { content }
 })
 
-app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const isMainWindow =
-      Boolean(mainWindow) && webContents.id === mainWindow.webContents.id
-    callback(
-      permission === 'geolocation' &&
-        isMainWindow &&
-        isAppUrl(webContents.getURL()),
-    )
-  })
-
-  createWindow()
-  createTray()
-
-  app.on('activate', () => {
-    showMainWindow()
-  })
+ipcMain.handle('settings:get', async () => {
+  return {
+    settings: readSettings(),
+    shortcut: getShortcutStatus(),
+  }
 })
+
+ipcMain.handle('settings:update-global-shortcut', async (_event, request) => {
+  const current = readSettings()
+  const enabled =
+    typeof request?.enabled === 'boolean'
+      ? request.enabled
+      : current.globalShortcut.enabled
+  const accelerator =
+    typeof request?.accelerator === 'string'
+      ? request.accelerator.trim()
+      : current.globalShortcut.accelerator
+
+  if (enabled && !isSafeAccelerator(accelerator)) {
+    return {
+      settings: current,
+      shortcut: {
+        ...current.globalShortcut,
+        registered: false,
+        message: '快捷键格式不可用，请使用 Ctrl/Alt/Shift 加一个按键',
+      },
+    }
+  }
+
+  const settings = writeSettings({
+    ...current,
+    globalShortcut: {
+      enabled,
+      accelerator: isSafeAccelerator(accelerator)
+        ? accelerator
+        : current.globalShortcut.accelerator,
+    },
+  })
+  const shortcut = registerGlobalShortcut(settings)
+  return { settings, shortcut }
+})
+
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (app.isReady()) {
+      showMainWindow()
+      return
+    }
+    app.whenReady().then(showMainWindow).catch(() => undefined)
+  })
+
+  app.whenReady().then(() => {
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      const isMainWindow =
+        Boolean(mainWindow) && webContents.id === mainWindow.webContents.id
+      callback(
+        permission === 'geolocation' &&
+          isMainWindow &&
+          isAppUrl(webContents.getURL()),
+      )
+    })
+
+    createWindow()
+    createTray()
+    registerGlobalShortcut()
+
+    app.on('activate', () => {
+      showMainWindow()
+    })
+  })
+}
 
 app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit()
@@ -269,4 +441,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  globalShortcut.unregisterAll()
 })

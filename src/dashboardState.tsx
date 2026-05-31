@@ -155,6 +155,12 @@ const clampNumber = (value: unknown, min: number, max: number, fallback: number)
   return Math.min(max, Math.max(min, Math.round(number)))
 }
 
+const isIsoDateTime = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false
+  const time = new Date(value).getTime()
+  return Number.isFinite(time)
+}
+
 const isLocalDateString = (value: unknown): value is string => {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const [year, month, day] = value.split('-').map(Number)
@@ -250,6 +256,9 @@ export const defaultState: DashboardState = {
     { id: uid(), title: '整理下载文件夹', done: false, kind: 'todo' },
     { id: uid(), title: '回复两封需要处理的邮件', done: true, kind: 'todo' },
   ],
+  tomorrowTasks: [
+    { id: uid(), title: '打开聚焦页，确认第一轮要推进什么', done: false, kind: 'top' },
+  ],
   projects: [
     {
       id: uid(),
@@ -308,6 +317,10 @@ export const defaultState: DashboardState = {
     apiKey: '',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4.1-mini',
+  },
+  retention: {
+    reviewArchiveDays: 0,
+    completedProjectDays: 0,
   },
   archives: [],
   focus: {
@@ -400,7 +413,8 @@ const normalizeProjects = (value: unknown): Project[] => {
       if (!isPlainObject(item)) return null
       const name = trimmedText(item.name)
       if (!name) return null
-      return {
+      const active = item.active !== false
+      const project: Project = {
         id: trimmedText(item.id) || uid(),
         name,
         nextAction: trimmedText(item.nextAction),
@@ -411,8 +425,14 @@ const normalizeProjects = (value: unknown): Project[] => {
           100_000 * 60,
           clampNumber(item.minutes, 0, 100_000, 0) * 60,
         ),
-        active: item.active !== false,
+        active,
       }
+      if (!active) {
+        project.completedAt = isIsoDateTime(item.completedAt)
+          ? item.completedAt
+          : new Date().toISOString()
+      }
+      return project
     })
     .filter((project): project is Project => Boolean(project))
   return projects.length ? projects : defaultState.projects
@@ -484,6 +504,7 @@ const normalizeArchives = (value: unknown): DailyArchive[] => {
         createdAt: textValue(item.createdAt, new Date().toISOString()),
         completedTasks: normalizeTasks(item.completedTasks, []).filter((task) => task.done),
         openTasks: normalizeTasks(item.openTasks, []).filter((task) => !task.done),
+        tomorrowTasks: normalizeTasks(item.tomorrowTasks, []),
         inbox: normalizeInbox(item.inbox, []),
         review: {
           did: isPlainObject(item.review) ? textValue(item.review.did) : '',
@@ -496,6 +517,35 @@ const normalizeArchives = (value: unknown): DailyArchive[] => {
     })
     .filter((archive): archive is DailyArchive => Boolean(archive))
     .slice(0, 60)
+}
+
+const normalizeRetention = (value: unknown): DashboardState['retention'] => {
+  const parsed = isPlainObject(value) ? value : {}
+  return {
+    reviewArchiveDays: clampNumber(
+      parsed.reviewArchiveDays,
+      0,
+      3650,
+      defaultState.retention.reviewArchiveDays,
+    ),
+    completedProjectDays: clampNumber(
+      parsed.completedProjectDays,
+      0,
+      3650,
+      defaultState.retention.completedProjectDays,
+    ),
+  }
+}
+
+const isWithinRetention = (
+  isoDateTime: string | undefined,
+  days: number,
+  now = Date.now(),
+) => {
+  if (days <= 0) return true
+  const time = isoDateTime ? new Date(isoDateTime).getTime() : NaN
+  if (!Number.isFinite(time)) return true
+  return now - time <= days * 86_400_000
 }
 
 const normalizeWeather = (value: unknown): DashboardState['weather'] => {
@@ -525,7 +575,6 @@ export const normalizeDashboardState = (
   const parsed = isPlainObject(input) ? (input as StoredDashboardState) : {}
   const quotes = normalizeQuotes(parsed)
   const projects = normalizeProjects(parsed.projects)
-  const projectIds = new Set(projects.map((project) => project.id))
   const durationMinutes = clampNumber(
     parsed.focus?.durationMinutes,
     5,
@@ -539,6 +588,17 @@ export const normalizeDashboardState = (
   const apiKey = options.preserveAiKey
     ? (options.currentState?.ai.apiKey ?? defaultState.ai.apiKey)
     : textValue(parsed.ai?.apiKey)
+  const retention = normalizeRetention(parsed.retention)
+  const now = Date.now()
+  const archives = normalizeArchives(parsed.archives).filter((archive) =>
+    isWithinRetention(archive.createdAt, retention.reviewArchiveDays, now),
+  )
+  const retainedProjects = projects.filter(
+    (project) =>
+      project.active !== false ||
+      isWithinRetention(project.completedAt, retention.completedProjectDays, now),
+  )
+  const projectIds = new Set(retainedProjects.map((project) => project.id))
 
   return {
     quotePoolVersion: quotes.quotePoolVersion,
@@ -555,7 +615,8 @@ export const normalizeDashboardState = (
     weather: normalizeWeather(parsed.weather),
     currentFocus: textValue(parsed.currentFocus, defaultState.currentFocus),
     tasks: normalizeTasks(parsed.tasks),
-    projects,
+    tomorrowTasks: normalizeTasks(parsed.tomorrowTasks, []),
+    projects: retainedProjects,
     quickLinks: normalizeQuickLinks(parsed.quickLinks),
     inbox: normalizeInbox(parsed.inbox),
     reminders: normalizeReminders(parsed.reminders),
@@ -572,7 +633,8 @@ export const normalizeDashboardState = (
       baseUrl: textValue(parsed.ai?.baseUrl, aiDefaults.baseUrl),
       model: textValue(parsed.ai?.model, aiDefaults.model),
     },
-    archives: normalizeArchives(parsed.archives),
+    retention,
+    archives,
     focus: {
       running: false,
       durationMinutes,

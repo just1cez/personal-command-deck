@@ -19,6 +19,7 @@ export type Project = {
   minutes: number
   focusSeconds: number
   active: boolean
+  completedAt?: string
 }
 
 export type QuickLink = {
@@ -53,6 +54,7 @@ export type DailyArchive = {
   createdAt: string
   completedTasks: Task[]
   openTasks: Task[]
+  tomorrowTasks: Task[]
   inbox: InboxItem[]
   review: DailyReview
   summary: string
@@ -123,6 +125,26 @@ export type AiSettings = {
   model: string
 }
 
+export type RetentionSettings = {
+  reviewArchiveDays: number
+  completedProjectDays: number
+}
+
+export type GlobalShortcutSettings = {
+  enabled: boolean
+  accelerator: string
+}
+
+export type GlobalShortcutStatus = GlobalShortcutSettings & {
+  registered: boolean
+  message: string
+}
+
+export type DesktopSettings = {
+  closeBehavior: 'ask' | 'tray' | 'quit'
+  globalShortcut: GlobalShortcutSettings
+}
+
 export type AiSummaryRequest = {
   apiKey: string
   baseUrl: string
@@ -145,6 +167,7 @@ export type DashboardState = {
   weather: Weather
   currentFocus: string
   tasks: Task[]
+  tomorrowTasks: Task[]
   projects: Project[]
   quickLinks: QuickLink[]
   inbox: InboxItem[]
@@ -152,6 +175,7 @@ export type DashboardState = {
   review: DailyReview
   reviewSummary: string
   ai: AiSettings
+  retention: RetentionSettings
   archives: DailyArchive[]
   focus: FocusSession
 }
