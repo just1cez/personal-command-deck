@@ -209,6 +209,11 @@ const retentionOptions = [
   { value: '365', label: '1 年' },
 ]
 
+const retentionSelectOptions = retentionOptions.map((option) => ({
+  ...option,
+  icon: option.value === '0' ? <Archive size={15} /> : <CalendarClock size={15} />,
+}))
+
 const defaultShortcutStatus: GlobalShortcutStatus = {
   enabled: false,
   accelerator: 'CommandOrControl+Shift+Space',
@@ -238,6 +243,79 @@ const getTotalFocusMinutes = (projects: Project[]) =>
       total + secondsToDisplayMinutes(project.focusSeconds ?? project.minutes * 60),
     0,
   )
+
+function RetentionControls({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (value: string) => void
+}) {
+  const selectValue = String(value)
+  const options = retentionSelectOptions.some((option) => option.value === selectValue)
+    ? retentionSelectOptions
+    : [
+        {
+          value: selectValue,
+          label: getRetentionLabel(value),
+          icon: <CalendarClock size={15} />,
+        },
+        ...retentionSelectOptions,
+      ]
+
+  return (
+    <>
+      <label className="retention-select-field">
+        <span>{label}</span>
+        <ThemedSelect
+          compact
+          value={selectValue}
+          aria-label={label}
+          options={options}
+          onChange={onChange}
+        />
+      </label>
+      <label className="retention-stepper-field">
+        <span>自定义天数</span>
+        <div className="retention-stepper">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={value}
+            onChange={(event) => onChange(event.target.value.replace(/\D/g, ''))}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.currentTarget.blur()
+              }
+            }}
+          />
+          <div>
+            <button
+              type="button"
+              title="增加 30 天"
+              aria-label="增加 30 天"
+              onClick={() => onChange(String(clampRetentionDays(value + 30)))}
+            >
+              <Plus size={13} />
+            </button>
+            <button
+              type="button"
+              title="减少 30 天"
+              aria-label="减少 30 天"
+              disabled={value <= 0}
+              onClick={() => onChange(String(clampRetentionDays(value - 30)))}
+            >
+              <Minus size={13} />
+            </button>
+          </div>
+        </div>
+      </label>
+    </>
+  )
+}
 
 const addFocusSecondsToProject = (project: Project, seconds: number): Project => {
   const focusSeconds = Math.max(
@@ -2411,38 +2489,11 @@ function App() {
                   <span>本机清理</span>
                   <strong>已结项项目 {getRetentionLabel(dashboard.retention.completedProjectDays)}</strong>
                 </div>
-                <label>
-                  <span>保留</span>
-                  <select
-                    value={dashboard.retention.completedProjectDays}
-                    onChange={(event) =>
-                      saveRetentionInput('completedProjectDays', event.target.value)
-                    }
-                  >
-                    {retentionOptions.map((option) => (
-                      <option value={option.value} key={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>天数</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="3650"
-                    value={dashboard.retention.completedProjectDays}
-                    onChange={(event) =>
-                      saveRetentionInput('completedProjectDays', event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.currentTarget.blur()
-                      }
-                    }}
-                  />
-                </label>
+                <RetentionControls
+                  label="保留"
+                  value={dashboard.retention.completedProjectDays}
+                  onChange={(value) => saveRetentionInput('completedProjectDays', value)}
+                />
               </div>
               {showCompletedProjects && (
                 <div className="completed-project-list">
@@ -2965,38 +3016,11 @@ function App() {
                 <strong>每日复盘 {getRetentionLabel(dashboard.retention.reviewArchiveDays)}</strong>
                 <small>导出文件不受应用管理；这里仅清理本机归档记录。</small>
               </div>
-              <label>
-                <span>复盘归档</span>
-                <select
-                  value={dashboard.retention.reviewArchiveDays}
-                  onChange={(event) =>
-                    saveRetentionInput('reviewArchiveDays', event.target.value)
-                  }
-                >
-                  {retentionOptions.map((option) => (
-                    <option value={option.value} key={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>自定义天数</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="3650"
-                  value={dashboard.retention.reviewArchiveDays}
-                  onChange={(event) =>
-                    saveRetentionInput('reviewArchiveDays', event.target.value)
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.currentTarget.blur()
-                    }
-                  }}
-                />
-              </label>
+              <RetentionControls
+                label="复盘归档"
+                value={dashboard.retention.reviewArchiveDays}
+                onChange={(value) => saveRetentionInput('reviewArchiveDays', value)}
+              />
             </div>
             {recentArchives.length ? (
               <>
