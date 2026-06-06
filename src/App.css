@@ -674,6 +674,11 @@
   z-index: 12;
 }
 
+.themed-select.drop-up .themed-select-menu {
+  bottom: calc(100% + 8px);
+  top: auto;
+}
+
 .themed-select-menu button {
   align-items: center;
   background: transparent;

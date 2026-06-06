@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -222,7 +222,37 @@ export function ThemedSelect({
   'aria-label'?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down')
+  const selectRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const selected = options.find((option) => option.value === value) ?? options[0]
+
+  useLayoutEffect(() => {
+    if (!open) return
+
+    const updateMenuPlacement = () => {
+      const selectElement = selectRef.current
+      const menuElement = menuRef.current
+      if (!selectElement || !menuElement) return
+
+      const selectRect = selectElement.getBoundingClientRect()
+      const menuHeight = menuElement.getBoundingClientRect().height
+      const menuGap = 8
+      const spaceBelow = window.innerHeight - selectRect.bottom - menuGap
+      const spaceAbove = selectRect.top - menuGap
+      const nextPlacement = menuHeight > spaceBelow && spaceAbove > spaceBelow ? 'up' : 'down'
+
+      setMenuPlacement((current) => (current === nextPlacement ? current : nextPlacement))
+    }
+
+    updateMenuPlacement()
+    window.addEventListener('resize', updateMenuPlacement)
+    window.addEventListener('scroll', updateMenuPlacement, true)
+    return () => {
+      window.removeEventListener('resize', updateMenuPlacement)
+      window.removeEventListener('scroll', updateMenuPlacement, true)
+    }
+  }, [open, options.length])
 
   useEffect(() => {
     if (!open) return
@@ -241,10 +271,12 @@ export function ThemedSelect({
 
   return (
     <div
+      ref={selectRef}
       className={[
         'themed-select',
         compact ? 'compact' : '',
         open ? 'open' : '',
+        open && menuPlacement === 'up' ? 'drop-up' : '',
         className,
       ]
         .filter(Boolean)
@@ -263,14 +295,17 @@ export function ThemedSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel ?? label}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setMenuPlacement('down')
+          setOpen((current) => !current)
+        }}
       >
         {selected?.icon}
         <span>{selected?.label ?? value}</span>
         <ChevronDown size={15} />
       </button>
       {open && (
-        <div className="themed-select-menu" role="listbox">
+        <div ref={menuRef} className="themed-select-menu" role="listbox">
           {options.map((option) => (
             <button
               type="button"
