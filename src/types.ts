@@ -161,6 +161,7 @@ export type DashboardState = {
   quotePoolVersion: number
   quotePool: Quote[]
   dailyQuote: DailyQuote
+  dailyCarryoverDate: string
   theme: Theme
   dayMode: DayMode
   energy: number

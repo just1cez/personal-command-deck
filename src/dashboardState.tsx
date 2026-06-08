@@ -239,6 +239,7 @@ export const defaultState: DashboardState = {
   quotePoolVersion: QUOTE_POOL_VERSION,
   quotePool: defaultQuotes,
   dailyQuote: { date: todayIso(), quoteId: pickQuoteId(defaultQuotes) },
+  dailyCarryoverDate: todayIso(),
   theme: 'dark',
   dayMode: '工作日',
   energy: 4,
@@ -604,6 +605,11 @@ export const normalizeDashboardState = (
     quotePoolVersion: quotes.quotePoolVersion,
     quotePool: quotes.quotePool,
     dailyQuote: quotes.dailyQuote,
+    dailyCarryoverDate: isLocalDateString(parsed.dailyCarryoverDate)
+      ? parsed.dailyCarryoverDate
+      : isLocalDateString(parsed.dailyQuote?.date)
+        ? parsed.dailyQuote.date
+        : todayIso(),
     motto: undefined,
     theme: validThemes.has(parsed.theme as Theme)
       ? (parsed.theme as Theme)

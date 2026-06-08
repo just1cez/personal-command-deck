@@ -78,6 +78,7 @@ import {
   daysUntil,
   downloadTextFile,
   formatDate,
+  formatLocalDate,
   formatTime,
   normalizeHttpUrl,
   readFileAsText,
@@ -139,6 +140,7 @@ const recognizableStateKeys = new Set([
   'currentFocus',
   'tasks',
   'tomorrowTasks',
+  'dailyCarryoverDate',
   'projects',
   'quickLinks',
   'inbox',
@@ -350,6 +352,37 @@ const settleFocusProject = (
   }
 }
 
+const carryTomorrowTasksIntoToday = (
+  current: DashboardState,
+  carryoverDate = current.dailyCarryoverDate,
+) => {
+  const openTopSlots = Math.max(
+    0,
+    3 - current.tasks.filter((item) => item.kind === 'top').length,
+  )
+  const carriedTasks = current.tomorrowTasks
+    .filter((task) => task.title.trim())
+    .map((task, index) => ({
+      id: uid(),
+      title: task.title.trim(),
+      done: false,
+      kind: index < openTopSlots ? ('top' as const) : ('todo' as const),
+    }))
+
+  if (!carriedTasks.length) {
+    return current.dailyCarryoverDate === carryoverDate
+      ? current
+      : { ...current, dailyCarryoverDate: carryoverDate }
+  }
+
+  return {
+    ...current,
+    dailyCarryoverDate: carryoverDate,
+    tasks: [...current.tasks, ...carriedTasks],
+    tomorrowTasks: [],
+  }
+}
+
 const buildArchive = (current: DashboardState): DailyArchive => {
   const completed = current.tasks.filter((task) => task.done)
   const open = current.tasks.filter((task) => !task.done)
@@ -430,6 +463,7 @@ function App() {
   }, [activeMainView])
   const weatherRequestId = useRef(0)
   const reminderDateInputRef = useRef<HTMLInputElement>(null)
+  const currentLocalDate = formatLocalDate(now)
 
   const updateDashboard = useCallback((updater: (current: DashboardState) => DashboardState) => {
     setDashboard(updater)
@@ -560,6 +594,25 @@ function App() {
     const interval = window.setInterval(pruneExpiredRecords, 3_600_000)
     return () => window.clearInterval(interval)
   }, [pruneExpiredRecords])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      updateDashboard((current) => {
+        if (current.dailyCarryoverDate >= currentLocalDate) return current
+
+        const carriedCount = current.tomorrowTasks.filter((task) => task.title.trim()).length
+        const next = carryTomorrowTasksIntoToday(current, currentLocalDate)
+        if (carriedCount) {
+          window.setTimeout(() => {
+            setDataNotice(`已把 ${carriedCount} 项明日任务带入今日任务`)
+          }, 0)
+        }
+        return next
+      })
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [currentLocalDate, updateDashboard])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1007,24 +1060,8 @@ function App() {
 
   const promoteTomorrowTasks = () => {
     updateDashboard((current) => {
-      const openTopSlots = Math.max(
-        0,
-        3 - current.tasks.filter((item) => item.kind === 'top').length,
-      )
-      const carriedTasks = current.tomorrowTasks
-        .filter((task) => task.title.trim())
-        .map((task, index) => ({
-          id: uid(),
-          title: task.title.trim(),
-          done: false,
-          kind: index < openTopSlots ? ('top' as const) : ('todo' as const),
-        }))
-      if (!carriedTasks.length) return current
-      return {
-        ...current,
-        tasks: [...current.tasks, ...carriedTasks],
-        tomorrowTasks: [],
-      }
+      const carried = carryTomorrowTasksIntoToday(current, todayIso())
+      return carried === current ? current : carried
     })
     setDataNotice('已把明日任务带入今日任务')
   }
@@ -2838,7 +2875,7 @@ function App() {
                   ))}
                 </ul>
                 <div className="tomorrow-plan-actions">
-                  <span>明天打开时，也可以一键带入今日任务。</span>
+                  <span>第二天会自动带入今日任务，也可以现在手动整理。</span>
                   <button type="button" className="secondary-action" onClick={promoteTomorrowTasks}>
                     <SquareCheckBig size={15} />
                     带入今日任务
