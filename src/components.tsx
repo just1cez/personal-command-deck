@@ -54,6 +54,9 @@ export function TaskRow({
   onMoveDown,
   canMoveUp,
   canMoveDown,
+  onRename,
+  maxLength = 80,
+  focusMinutes,
 }: {
   task: Task
   orderMoveDirection?: 'up' | 'down'
@@ -63,7 +66,33 @@ export function TaskRow({
   onMoveDown: () => void
   canMoveUp: boolean
   canMoveDown: boolean
+  onRename?: (title: string) => void
+  maxLength?: number
+  focusMinutes?: number
 }) {
+  const editable = Boolean(onRename)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(task.title)
+
+  const commitRename = () => {
+    const next = draft.trim()
+    if (next && next !== task.title) {
+      onRename?.(next)
+    }
+    setEditing(false)
+  }
+
+  const cancelRename = () => {
+    setDraft(task.title)
+    setEditing(false)
+  }
+
+  const startEditing = () => {
+    if (!editable) return
+    setDraft(task.title)
+    setEditing(true)
+  }
+
   return (
     <li
       className={[
@@ -77,7 +106,42 @@ export function TaskRow({
       <button type="button" className="check-button" onClick={onToggle}>
         {task.done ? <Check size={15} /> : <Circle size={15} />}
       </button>
-      <span>{task.title}</span>
+      <div className="task-main">
+        {editing ? (
+          <input
+            className="task-edit-input"
+            value={draft}
+            maxLength={maxLength}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitRename()
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                cancelRename()
+              }
+            }}
+          />
+        ) : (
+          <span
+            className={editable ? 'task-title-editable' : ''}
+            title={editable ? '双击编辑任务' : undefined}
+            onDoubleClick={startEditing}
+          >
+            {task.title}
+          </span>
+        )}
+        {focusMinutes && focusMinutes > 0 ? (
+          <span className="task-focus-badge" title={`已专注 ${focusMinutes} 分钟`}>
+            {focusMinutes}分
+          </span>
+        ) : null}
+      </div>
       <OrderControls
         canMoveUp={canMoveUp}
         canMoveDown={canMoveDown}

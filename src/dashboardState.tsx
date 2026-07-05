@@ -251,14 +251,14 @@ export const defaultState: DashboardState = {
   },
   currentFocus: '个人指挥台 MVP',
   tasks: [
-    { id: uid(), title: '确定今天最重要的一个推进点', done: false, kind: 'top' },
-    { id: uid(), title: '完成个人指挥台本地版主界面', done: false, kind: 'top' },
-    { id: uid(), title: '睡前写 3 分钟复盘', done: false, kind: 'top' },
-    { id: uid(), title: '整理下载文件夹', done: false, kind: 'todo' },
-    { id: uid(), title: '回复两封需要处理的邮件', done: true, kind: 'todo' },
+    { id: uid(), title: '确定今天最重要的一个推进点', done: false, kind: 'top', focusSeconds: 0 },
+    { id: uid(), title: '完成个人指挥台本地版主界面', done: false, kind: 'top', focusSeconds: 0 },
+    { id: uid(), title: '睡前写 3 分钟复盘', done: false, kind: 'top', focusSeconds: 0 },
+    { id: uid(), title: '整理下载文件夹', done: false, kind: 'todo', focusSeconds: 0 },
+    { id: uid(), title: '回复两封需要处理的邮件', done: true, kind: 'todo', focusSeconds: 0 },
   ],
   tomorrowTasks: [
-    { id: uid(), title: '打开聚焦页，确认第一轮要推进什么', done: false, kind: 'top' },
+    { id: uid(), title: '打开聚焦页，确认第一轮要推进什么', done: false, kind: 'top', focusSeconds: 0 },
   ],
   projects: [
     {
@@ -330,6 +330,7 @@ export const defaultState: DashboardState = {
     durationMinutes: 25,
     projectId: '',
     taskLabel: '',
+    taskId: '',
   },
 }
 
@@ -396,12 +397,14 @@ const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] =
       const title = trimmedText(item.title)
       const kind = item.kind === 'top' || item.kind === 'todo' ? item.kind : 'todo'
       if (!title) return null
-      return {
+      const task: Task = {
         id: trimmedText(item.id) || uid(),
         title,
         done: booleanValue(item.done),
         kind,
+        focusSeconds: clampNumber(item.focusSeconds, 0, 100_000 * 60, 0),
       }
+      return task
     })
     .filter((task): task is Task => Boolean(task))
   return tasks.length ? tasks : fallback
@@ -600,6 +603,8 @@ export const normalizeDashboardState = (
       isWithinRetention(project.completedAt, retention.completedProjectDays, now),
   )
   const projectIds = new Set(retainedProjects.map((project) => project.id))
+  const tasks = normalizeTasks(parsed.tasks)
+  const taskIds = new Set(tasks.map((task) => task.id))
 
   return {
     quotePoolVersion: quotes.quotePoolVersion,
@@ -620,7 +625,7 @@ export const normalizeDashboardState = (
     energy: clampNumber(parsed.energy, 1, 5, defaultState.energy),
     weather: normalizeWeather(parsed.weather),
     currentFocus: textValue(parsed.currentFocus, defaultState.currentFocus),
-    tasks: normalizeTasks(parsed.tasks),
+    tasks,
     tomorrowTasks: normalizeTasks(parsed.tomorrowTasks, []),
     projects: retainedProjects,
     quickLinks: normalizeQuickLinks(parsed.quickLinks),
@@ -655,6 +660,10 @@ export const normalizeDashboardState = (
           ? textValue(parsed.focus?.projectId)
           : '',
       taskLabel: textValue(parsed.focus?.taskLabel),
+      taskId:
+        textValue(parsed.focus?.taskId) && taskIds.has(textValue(parsed.focus?.taskId))
+          ? textValue(parsed.focus?.taskId)
+          : '',
       endsAt: undefined,
       startedAt: undefined,
     },
