@@ -1031,12 +1031,68 @@ kbd {
   width: 100%;
 }
 
+.task-row .task-title-editable {
+  cursor: text;
+}
+
+.task-edit-input {
+  background: var(--input);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 6px;
+  color: var(--heading);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.35;
+  min-width: 0;
+  padding: 4px 7px;
+  width: 100%;
+}
+
+.task-edit-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .task-row.done span {
   color: var(--muted);
 }
 
 .task-row.done span::after {
   transform: scaleX(1);
+}
+
+.task-main {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-main > span:not(.task-focus-badge) {
+  flex: 0 1 auto;
+}
+
+.task-focus-badge {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.task-focus-badge::after {
+  content: none;
+}
+
+.task-row.done .task-focus-badge {
+  color: var(--muted);
 }
 
 .check-button,
@@ -3180,6 +3236,29 @@ button {
   overflow-wrap: anywhere;
 }
 
+.focus-dialog-task {
+  display: grid;
+  gap: 7px;
+}
+
+.focus-dialog-task > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.focus-dialog-task-select {
+  width: 100%;
+}
+
+.focus-dialog-task-select .themed-select-trigger {
+  width: 100%;
+}
+
+.focus-dialog-task-select .themed-select-menu button {
+  grid-template-columns: 1fr 16px;
+}
+
 .focus-duration-presets {
   display: grid;
   gap: 8px;
@@ -3248,18 +3327,37 @@ button {
   color: var(--accent);
 }
 
-.focus-dialog-stepper div {
+.focus-dialog-stepper .focus-dialog-minutes {
   align-items: baseline;
   color: var(--heading);
-  display: inline-flex;
+  cursor: text;
+  display: flex;
   gap: 5px;
   justify-content: center;
+  min-width: 0;
+  padding: 0 12px;
 }
 
 .focus-dialog-stepper strong {
   font-family: var(--mono);
   font-size: 28px;
   line-height: 1;
+}
+
+.focus-dialog-stepper input {
+  background: transparent;
+  border: 0;
+  color: var(--heading);
+  font-family: var(--mono);
+  font-size: 28px;
+  line-height: 1;
+  padding: 0;
+  text-align: right;
+  width: 2.6ch;
+}
+
+.focus-dialog-stepper input:focus {
+  outline: none;
 }
 
 .focus-dialog-stepper span {

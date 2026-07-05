@@ -10,6 +10,7 @@ export type Task = {
   title: string
   done: boolean
   kind: TaskKind
+  focusSeconds?: number
 }
 
 export type Project = {
@@ -113,6 +114,7 @@ export type FocusSession = {
   durationMinutes: number
   projectId: string
   taskLabel: string
+  taskId?: string
   endsAt?: string
   startedAt?: string
 }

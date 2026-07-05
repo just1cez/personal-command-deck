@@ -48,6 +48,7 @@ import type {
   Quote,
   QuickLink,
   StoredDashboardState,
+  Task,
   TaskKind,
   Theme,
   WeatherPosition,
@@ -352,6 +353,20 @@ const settleFocusProject = (
   }
 }
 
+const settleFocusTask = (
+  current: DashboardState,
+  taskId: string | undefined,
+  seconds: number,
+): Task[] => {
+  if (!taskId || seconds <= 0) return current.tasks
+  if (!current.tasks.some((task) => task.id === taskId)) return current.tasks
+  return current.tasks.map((task) =>
+    task.id === taskId
+      ? { ...task, focusSeconds: Math.max(0, (task.focusSeconds ?? 0) + Math.max(0, seconds)) }
+      : task,
+  )
+}
+
 const carryTomorrowTasksIntoToday = (
   current: DashboardState,
   carryoverDate = current.dailyCarryoverDate,
@@ -448,6 +463,7 @@ function App() {
   const [showCompletedProjects, setShowCompletedProjects] = useState(false)
   const [pendingFocusProjectId, setPendingFocusProjectId] = useState<string | null>(null)
   const [pendingFocusMinutes, setPendingFocusMinutes] = useState(() => dashboard.focus.durationMinutes)
+  const [pendingFocusTaskId, setPendingFocusTaskId] = useState('')
   const [expandedArchiveId, setExpandedArchiveId] = useState<string | null>(null)
   const [movedOrderItem, setMovedOrderItem] = useState<{
     id: string
@@ -531,16 +547,19 @@ function App() {
             current.focus.projectId,
             elapsedSeconds,
           )
+          const tasks = settleFocusTask(current, current.focus.taskId, elapsedSeconds)
           if (notice) window.setTimeout(() => setDataNotice(notice), 0)
           return {
             ...current,
             projects,
+            tasks,
             currentFocus: '等待下一次启动',
             focus: {
               ...current.focus,
               running: false,
               secondsLeft: current.focus.durationMinutes * 60,
               taskLabel: '',
+              taskId: '',
               endsAt: undefined,
               startedAt: undefined,
             },
@@ -1010,6 +1029,15 @@ function App() {
     }))
   }
 
+  const renameTask = (id: string, title: string) => {
+    updateDashboard((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) =>
+        task.id === id ? { ...task, title } : task,
+      ),
+    }))
+  }
+
   const addTomorrowTask = () => {
     const title = newTomorrowTask.trim()
     if (!title) return
@@ -1333,17 +1361,20 @@ function App() {
         current.focus.projectId,
         elapsedSeconds,
       )
+      const tasks = settleFocusTask(current, current.focus.taskId, elapsedSeconds)
       if (notice) window.setTimeout(() => setDataNotice(notice), 0)
 
       return {
         ...current,
         projects,
+        tasks,
         currentFocus: nextLabel,
         focus: {
           ...current.focus,
           running: true,
           projectId: project.id,
           taskLabel: nextLabel,
+          taskId: isSamePausedFocus ? current.focus.taskId : '',
           secondsLeft,
           endsAt: createFocusEndTime(secondsLeft),
           startedAt: new Date().toISOString(),
@@ -1355,6 +1386,7 @@ function App() {
   const openProjectFocusDialog = useCallback((project: Project) => {
     setPendingFocusProjectId(project.id)
     setPendingFocusMinutes(dashboard.focus.durationMinutes)
+    setPendingFocusTaskId('')
   }, [dashboard.focus.durationMinutes])
 
   const startPendingProjectFocus = useCallback(() => {
@@ -1372,12 +1404,14 @@ function App() {
         current.focus.projectId,
         elapsedSeconds,
       )
+      const tasks = settleFocusTask(current, current.focus.taskId, elapsedSeconds)
       const secondsLeft = durationMinutes * 60
       if (notice) window.setTimeout(() => setDataNotice(notice), 0)
 
       return {
         ...current,
         projects,
+        tasks,
         currentFocus: project.nextAction,
         focus: {
           ...current.focus,
@@ -1385,6 +1419,7 @@ function App() {
           running: true,
           projectId: project.id,
           taskLabel: project.nextAction,
+          taskId: pendingFocusTaskId,
           secondsLeft,
           endsAt: createFocusEndTime(secondsLeft),
           startedAt: new Date().toISOString(),
@@ -1393,7 +1428,7 @@ function App() {
     })
     setPendingFocusProjectId(null)
     setActiveMainView('start')
-  }, [pendingFocusMinutes, pendingFocusProject, updateDashboard])
+  }, [pendingFocusMinutes, pendingFocusProject, pendingFocusTaskId, updateDashboard])
 
   useEffect(() => {
     if (!pendingFocusProjectId) return
@@ -1476,10 +1511,12 @@ function App() {
         current.focus.projectId,
         elapsedSeconds,
       )
+      const tasks = settleFocusTask(current, current.focus.taskId, elapsedSeconds)
       if (notice) window.setTimeout(() => setDataNotice(notice), 0)
       return {
         ...current,
         projects,
+        tasks,
         focus: {
           ...current.focus,
           running: false,
@@ -1501,16 +1538,19 @@ function App() {
         current.focus.projectId,
         elapsedSeconds,
       )
+      const tasks = settleFocusTask(current, current.focus.taskId, elapsedSeconds)
       if (notice) window.setTimeout(() => setDataNotice(notice), 0)
       return {
         ...current,
         projects,
+        tasks,
         currentFocus: '等待下一次启动',
         focus: {
           ...current.focus,
           running: false,
           secondsLeft: current.focus.durationMinutes * 60,
           taskLabel: '',
+          taskId: '',
           endsAt: undefined,
           startedAt: undefined,
         },
@@ -2268,6 +2308,9 @@ function App() {
                 }
                 onToggle={() => toggleTask(task.id)}
                 onRemove={() => removeTask(task.id)}
+                onRename={(title) => renameTask(task.id, title)}
+                focusMinutes={secondsToDisplayMinutes(task.focusSeconds ?? 0)}
+                maxLength={60}
                 onMoveUp={() => moveTaskWithinKind(task.id, 'up')}
                 onMoveDown={() => moveTaskWithinKind(task.id, 'down')}
                 canMoveUp={index > 0}
@@ -2330,6 +2373,9 @@ function App() {
                 }
                 onToggle={() => toggleTask(task.id)}
                 onRemove={() => removeTask(task.id)}
+                onRename={(title) => renameTask(task.id, title)}
+                focusMinutes={secondsToDisplayMinutes(task.focusSeconds ?? 0)}
+                maxLength={80}
                 onMoveUp={() => moveTaskWithinKind(task.id, 'up')}
                 onMoveDown={() => moveTaskWithinKind(task.id, 'down')}
                 canMoveUp={index > 0}
@@ -3213,6 +3259,24 @@ function App() {
               <span>本轮目标</span>
               <strong>{pendingFocusProject.nextAction}</strong>
             </div>
+            <label className="focus-dialog-task">
+              <span>关联今日待办</span>
+              <ThemedSelect
+                className="focus-dialog-task-select"
+                aria-label="关联今日待办"
+                value={pendingFocusTaskId}
+                onChange={setPendingFocusTaskId}
+                options={[
+                  { value: '', label: '不关联待办' },
+                  ...topTasks
+                    .filter((task) => !task.done)
+                    .map((task) => ({ value: task.id, label: `Top·${task.title}` })),
+                  ...todos
+                    .filter((task) => !task.done)
+                    .map((task) => ({ value: task.id, label: task.title })),
+                ]}
+              />
+            </label>
             <div className="focus-duration-presets" aria-label="选择专注时长">
               {[15, 25, 30, 45, 60].map((minutes) => (
                 <button
@@ -3234,10 +3298,28 @@ function App() {
               >
                 <Minus size={16} />
               </button>
-              <div>
-                <strong>{pendingFocusMinutes}</strong>
+              <label className="focus-dialog-minutes">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-label="专注分钟数"
+                  value={pendingFocusMinutes === 0 ? '' : pendingFocusMinutes}
+                  onChange={(event) =>
+                    setPendingFocusMinutes(Number(event.target.value.replace(/\D/g, '')) || 0)
+                  }
+                  onBlur={() =>
+                    setPendingFocusMinutes((minutes) => Math.min(120, Math.max(5, minutes)))
+                  }
+                  onKeyDown={(event) => {
+                    event.stopPropagation()
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
                 <span>分钟</span>
-              </div>
+              </label>
               <button
                 type="button"
                 title="增加 5 分钟"
