@@ -11,6 +11,7 @@ export type Task = {
   done: boolean
   kind: TaskKind
   focusSeconds?: number
+  progress?: number
 }
 
 export type Project = {
@@ -21,6 +22,7 @@ export type Project = {
   focusSeconds: number
   active: boolean
   completedAt?: string
+  progress?: number
 }
 
 export type QuickLink = {

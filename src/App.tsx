@@ -75,6 +75,7 @@ import {
 } from './ai'
 import {
   buildLocalSummary,
+  clampProgress,
   dateAfter,
   daysUntil,
   downloadTextFile,
@@ -419,6 +420,42 @@ const buildArchive = (current: DashboardState): DailyArchive => {
   }
 }
 
+type ManualFocusTarget = {
+  label: string
+  source: string
+  projectId: string
+  taskId: string
+}
+
+const resolveManualFocusTarget = (
+  choice: string,
+  tasks: Task[],
+  activeProjects: Project[],
+  defaultProjectId: string,
+): ManualFocusTarget | null => {
+  if (choice.startsWith('task:')) {
+    const task = tasks.find((item) => item.id === choice.slice(5) && !item.done)
+    if (!task) return null
+    return {
+      label: task.title,
+      source: task.kind === 'top' ? '来自 Top 3' : '来自普通待办',
+      projectId: defaultProjectId,
+      taskId: task.id,
+    }
+  }
+  if (choice.startsWith('project:')) {
+    const project = activeProjects.find((item) => item.id === choice.slice(8))
+    if (!project) return null
+    return {
+      label: project.nextAction || project.name,
+      source: `来自项目 · ${project.name}`,
+      projectId: project.id,
+      taskId: '',
+    }
+  }
+  return null
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardState>(() => loadState())
   const [activeMainView, setActiveMainView] = useState<MainView>(() => loadMainView())
@@ -464,6 +501,7 @@ function App() {
   const [pendingFocusProjectId, setPendingFocusProjectId] = useState<string | null>(null)
   const [pendingFocusMinutes, setPendingFocusMinutes] = useState(() => dashboard.focus.durationMinutes)
   const [pendingFocusTaskId, setPendingFocusTaskId] = useState('')
+  const [startFocusChoice, setStartFocusChoice] = useState('')
   const [expandedArchiveId, setExpandedArchiveId] = useState<string | null>(null)
   const [movedOrderItem, setMovedOrderItem] = useState<{
     id: string
@@ -819,19 +857,53 @@ function App() {
     Boolean(dashboard.focus.taskLabel) &&
     dashboard.focus.secondsLeft > 0 &&
     dashboard.focus.secondsLeft < dashboard.focus.durationMinutes * 60
+  const focusChoiceOptions = [
+    { value: '', label: '自动推荐', icon: <Sparkles size={15} /> },
+    ...topTasks
+      .filter((task) => !task.done)
+      .map((task) => ({
+        value: `task:${task.id}`,
+        label: `Top · ${task.title}`,
+        icon: <Focus size={15} />,
+      })),
+    ...todos
+      .filter((task) => !task.done)
+      .map((task) => ({
+        value: `task:${task.id}`,
+        label: task.title,
+        icon: <SquareCheckBig size={15} />,
+      })),
+    ...activeProjects.map((project) => ({
+      value: `project:${project.id}`,
+      label: `项目 · ${project.name}`,
+      icon: <Flame size={15} />,
+    })),
+  ]
+  const manualFocusTarget = startFocusChoice
+    ? resolveManualFocusTarget(
+        startFocusChoice,
+        dashboard.tasks,
+        activeProjects,
+        defaultFocusProject?.id ?? '',
+      )
+    : null
   const visibleFocusTarget = {
     label: dashboard.focus.running
       ? dashboard.currentFocus
-      : hasPausedFocus
-        ? dashboard.focus.taskLabel
-        : focusTarget.label,
+      : manualFocusTarget
+        ? manualFocusTarget.label
+        : hasPausedFocus
+          ? dashboard.focus.taskLabel
+          : focusTarget.label,
     source: dashboard.focus.running
       ? activeProject
         ? `正在记录到 ${activeProject.name}`
         : '正在专注'
-      : hasPausedFocus
-        ? '已暂停，可继续'
-        : focusTarget.source,
+      : manualFocusTarget
+        ? manualFocusTarget.source
+        : hasPausedFocus
+          ? '已暂停，可继续'
+          : focusTarget.source,
   }
   const totalFocusMinutes = getTotalFocusMinutes(dashboard.projects)
   const upcomingReminders = dashboard.reminders
@@ -1016,8 +1088,20 @@ function App() {
   const toggleTask = useCallback((id: string) => {
     updateDashboard((current) => ({
       ...current,
+      tasks: current.tasks.map((task) => {
+        if (task.id !== id) return task
+        const done = !task.done
+        return { ...task, done, progress: done ? 100 : 0 }
+      }),
+    }))
+  }, [updateDashboard])
+
+  const setTaskProgress = useCallback((id: string, value: number) => {
+    const progress = clampProgress(value)
+    updateDashboard((current) => ({
+      ...current,
       tasks: current.tasks.map((task) =>
-        task.id === id ? { ...task, done: !task.done } : task,
+        task.id === id ? { ...task, progress, done: progress >= 100 } : task,
       ),
     }))
   }, [updateDashboard])
@@ -1144,6 +1228,10 @@ function App() {
         project.id === id ? { ...project, ...patch } : project,
       ),
     }))
+  }
+
+  const setProjectProgress = (id: string, value: number) => {
+    updateProject(id, { progress: clampProgress(value) })
   }
 
   const removeProject = (id: string) => {
@@ -1334,7 +1422,7 @@ function App() {
     }))
   }
 
-  const startFocus = useCallback((projectId = dashboard.focus.projectId, taskLabel = '') => {
+  const startFocus = useCallback((projectId = dashboard.focus.projectId, taskLabel = '', taskId = '') => {
     const project =
       dashboard.projects.find((item) => item.id === projectId) ?? dashboard.projects[0]
     if (!project) return
@@ -1374,7 +1462,7 @@ function App() {
           running: true,
           projectId: project.id,
           taskLabel: nextLabel,
-          taskId: isSamePausedFocus ? current.focus.taskId : '',
+          taskId: isSamePausedFocus ? current.focus.taskId : taskId,
           secondsLeft,
           endsAt: createFocusEndTime(secondsLeft),
           startedAt: new Date().toISOString(),
@@ -2044,7 +2132,19 @@ function App() {
         <article className="panel focus-start-panel">
           <PanelTitle icon={<Focus size={20} />} title="今日专注" aside={`${completionRate}%`} />
           <div className="focus-priority">
-            <span>本轮目标</span>
+            <div className="focus-priority-head">
+              <span>本轮目标</span>
+              {!dashboard.focus.running && (
+                <ThemedSelect
+                  compact
+                  className="focus-target-select"
+                  aria-label="选择本轮专注目标"
+                  value={startFocusChoice}
+                  options={focusChoiceOptions}
+                  onChange={setStartFocusChoice}
+                />
+              )}
+            </div>
             <strong>{visibleFocusTarget.label}</strong>
             <small className="focus-source">{visibleFocusTarget.source}</small>
           </div>
@@ -2052,12 +2152,24 @@ function App() {
             dashboard={dashboard}
             focusLabel={visibleFocusTarget.label}
             onDurationChange={setFocusDuration}
-            onStart={() =>
-              startFocus(
-                hasPausedFocus ? dashboard.focus.projectId : defaultFocusProject?.id,
-                visibleFocusTarget.label,
-              )
-            }
+            onStart={() => {
+              if (manualFocusTarget) {
+                startFocus(
+                  manualFocusTarget.projectId,
+                  manualFocusTarget.label,
+                  manualFocusTarget.taskId,
+                )
+                setStartFocusChoice('')
+              } else if (hasPausedFocus) {
+                startFocus(
+                  dashboard.focus.projectId,
+                  dashboard.focus.taskLabel,
+                  dashboard.focus.taskId,
+                )
+              } else {
+                startFocus(defaultFocusProject?.id, focusTarget.label)
+              }
+            }}
             onPause={pauseFocus}
             onReset={resetFocus}
           />
@@ -2309,6 +2421,7 @@ function App() {
                 onToggle={() => toggleTask(task.id)}
                 onRemove={() => removeTask(task.id)}
                 onRename={(title) => renameTask(task.id, title)}
+                onProgressChange={(value) => setTaskProgress(task.id, value)}
                 focusMinutes={secondsToDisplayMinutes(task.focusSeconds ?? 0)}
                 maxLength={60}
                 onMoveUp={() => moveTaskWithinKind(task.id, 'up')}
@@ -2374,6 +2487,7 @@ function App() {
                 onToggle={() => toggleTask(task.id)}
                 onRemove={() => removeTask(task.id)}
                 onRename={(title) => renameTask(task.id, title)}
+                onProgressChange={(value) => setTaskProgress(task.id, value)}
                 focusMinutes={secondsToDisplayMinutes(task.focusSeconds ?? 0)}
                 maxLength={80}
                 onMoveUp={() => moveTaskWithinKind(task.id, 'up')}
@@ -2507,6 +2621,25 @@ function App() {
                         <span>下一步</span>
                         <h3>{project.name}</h3>
                         <p>{project.nextAction}</p>
+                      </div>
+                      <div className="project-progress">
+                        <span>完成度</span>
+                        <input
+                          type="range"
+                          className="progress-slider"
+                          min={0}
+                          max={100}
+                          step={10}
+                          value={project.progress ?? 0}
+                          aria-label={`${project.name} 完成度`}
+                          style={
+                            { '--progress': `${project.progress ?? 0}%` } as React.CSSProperties
+                          }
+                          onChange={(event) =>
+                            setProjectProgress(project.id, Number(event.target.value))
+                          }
+                        />
+                        <strong>{project.progress ?? 0}%</strong>
                       </div>
                       <div className="project-meta">
                         <span>{project.minutes} 分钟已记录</span>
