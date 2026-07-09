@@ -27,7 +27,7 @@ import type {
   Task,
   Theme,
 } from './types'
-import { dateAfter, formatLocalDate, normalizeHttpUrl, todayIso, uid } from './utils'
+import { clampProgress, dateAfter, formatLocalDate, normalizeHttpUrl, todayIso, uid } from './utils'
 
 export const STORAGE_KEY = 'personal-command-dashboard-v1'
 export const QUOTE_POOL_VERSION = 4
@@ -397,12 +397,19 @@ const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] =
       const title = trimmedText(item.title)
       const kind = item.kind === 'top' || item.kind === 'todo' ? item.kind : 'todo'
       if (!title) return null
+      const done = booleanValue(item.done)
       const task: Task = {
         id: trimmedText(item.id) || uid(),
         title,
-        done: booleanValue(item.done),
+        done,
         kind,
         focusSeconds: clampNumber(item.focusSeconds, 0, 100_000 * 60, 0),
+        progress:
+          typeof item.progress === 'number' && Number.isFinite(item.progress)
+            ? clampProgress(item.progress)
+            : done
+              ? 100
+              : 0,
       }
       return task
     })
@@ -430,6 +437,10 @@ const normalizeProjects = (value: unknown): Project[] => {
           clampNumber(item.minutes, 0, 100_000, 0) * 60,
         ),
         active,
+        progress:
+          typeof item.progress === 'number' && Number.isFinite(item.progress)
+            ? clampProgress(item.progress)
+            : 0,
       }
       if (!active) {
         project.completedAt = isIsoDateTime(item.completedAt)

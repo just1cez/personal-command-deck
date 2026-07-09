@@ -959,6 +959,110 @@ kbd {
   transition: width 240ms ease;
 }
 
+.progress-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  flex: 1 1 auto;
+  height: 16px;
+  margin: 0;
+  min-width: 0;
+}
+
+.progress-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0 var(--progress, 0%),
+    color-mix(in srgb, var(--muted) 22%, transparent) var(--progress, 0%) 100%
+  );
+  border-radius: 999px;
+  height: 6px;
+}
+
+.progress-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--shadow-color, rgba(0, 0, 0, 0.25)) 80%, transparent);
+  height: 14px;
+  margin-top: -4px;
+  width: 14px;
+}
+
+.progress-slider::-moz-range-track {
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
+  border-radius: 999px;
+  height: 6px;
+}
+
+.progress-slider::-moz-range-progress {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border-radius: 999px;
+  height: 6px;
+}
+
+.progress-slider::-moz-range-thumb {
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  height: 14px;
+  width: 14px;
+}
+
+.progress-slider:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.progress-slider:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.task-progress {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  grid-column: 1 / -1;
+  padding: 2px 4px 0;
+}
+
+.task-row .task-progress-value {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 36px;
+  text-align: right;
+}
+
+.project-progress {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.project-progress > span {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.project-progress > strong {
+  color: var(--heading);
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 800;
+  min-width: 40px;
+  text-align: right;
+}
+
 .section-heading {
   align-items: center;
   color: var(--heading);
@@ -1482,6 +1586,28 @@ button {
   font-weight: 800;
 }
 
+.duration-stepper-input {
+  background: transparent;
+  border: 0;
+  color: var(--heading);
+  font-family: var(--mono);
+  font-size: 19px;
+  line-height: 1;
+  min-width: 0;
+  padding: 0;
+  text-align: right;
+  width: 2.4ch;
+}
+
+.duration-stepper-input:focus {
+  outline: none;
+}
+
+.duration-stepper-input:disabled {
+  color: var(--heading);
+  opacity: 1;
+}
+
 .focus-priority {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%),
@@ -1491,6 +1617,32 @@ button {
   display: grid;
   gap: 12px;
   padding: 20px;
+}
+
+.focus-priority-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.focus-target-select {
+  flex: 0 1 auto;
+  max-width: 64%;
+}
+
+.focus-target-select .themed-select-trigger {
+  width: 100%;
+}
+
+/* Size the open menu to its own content (capped), not to the last-selected
+   label, and anchor it to the right so it grows into the panel. */
+.focus-target-select .themed-select-menu {
+  left: auto;
+  right: 0;
+  width: max-content;
+  max-width: min(380px, 80vw);
 }
 
 .focus-priority span,

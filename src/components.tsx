@@ -57,6 +57,7 @@ export function TaskRow({
   onRename,
   maxLength = 80,
   focusMinutes,
+  onProgressChange,
 }: {
   task: Task
   orderMoveDirection?: 'up' | 'down'
@@ -69,10 +70,12 @@ export function TaskRow({
   onRename?: (title: string) => void
   maxLength?: number
   focusMinutes?: number
+  onProgressChange?: (value: number) => void
 }) {
   const editable = Boolean(onRename)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(task.title)
+  const progressValue = task.progress ?? (task.done ? 100 : 0)
 
   const commitRename = () => {
     const next = draft.trim()
@@ -156,6 +159,23 @@ export function TaskRow({
       >
         <Trash2 size={15} />
       </button>
+      {onProgressChange && (
+        <div className="task-progress">
+          <input
+            type="range"
+            className="progress-slider"
+            min={0}
+            max={100}
+            step={10}
+            value={progressValue}
+            aria-label={`${task.title} 完成度`}
+            style={{ '--progress': `${progressValue}%` } as React.CSSProperties}
+            onChange={(event) => onProgressChange(Number(event.target.value))}
+            onKeyDown={(event) => event.stopPropagation()}
+          />
+          <strong className="task-progress-value">{progressValue}%</strong>
+        </div>
+      )}
     </li>
   )
 }
@@ -212,6 +232,19 @@ export function FocusControls({
   onPause: () => void
   onReset: () => void
 }) {
+  const running = dashboard.focus.running
+  const [durationDraft, setDurationDraft] = useState<string | null>(null)
+
+  const commitDuration = () => {
+    if (durationDraft === null) return
+    const next = Math.min(
+      120,
+      Math.max(5, Number(durationDraft) || dashboard.focus.durationMinutes),
+    )
+    onDurationChange(next)
+    setDurationDraft(null)
+  }
+
   return (
     <div className="focus-console">
       <div className="timer-readout">
@@ -224,7 +257,7 @@ export function FocusControls({
           <button
             type="button"
             title="减少 5 分钟"
-            disabled={dashboard.focus.running}
+            disabled={running}
             onClick={() =>
               onDurationChange(Math.max(5, dashboard.focus.durationMinutes - 5))
             }
@@ -232,13 +265,33 @@ export function FocusControls({
             <Minus size={14} />
           </button>
           <span>
-            <strong>{dashboard.focus.durationMinutes}</strong>
+            <input
+              className="duration-stepper-input"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              aria-label="手动输入专注分钟数"
+              title="手动输入专注分钟数"
+              disabled={running}
+              value={durationDraft ?? dashboard.focus.durationMinutes}
+              onChange={(event) =>
+                setDurationDraft(event.target.value.replace(/\D/g, ''))
+              }
+              onFocus={(event) => event.currentTarget.select()}
+              onBlur={commitDuration}
+              onKeyDown={(event) => {
+                event.stopPropagation()
+                if (event.key === 'Enter') {
+                  event.currentTarget.blur()
+                }
+              }}
+            />
             <small>分钟</small>
           </span>
           <button
             type="button"
             title="增加 5 分钟"
-            disabled={dashboard.focus.running}
+            disabled={running}
             onClick={() =>
               onDurationChange(Math.min(120, dashboard.focus.durationMinutes + 5))
             }

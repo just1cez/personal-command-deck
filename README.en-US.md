@@ -6,10 +6,10 @@ It is not a team dashboard, calendar replacement, or heavy productivity system. 
 
 ## What You See When You Open It
 
-- Today's focus: the current target, focus timer, start button, completion rate, focus minutes, and nearby reminders.
-- Top 3 tasks: the three things that matter most today.
-- Normal todos: smaller tasks that should not compete with the Top 3.
-- Project next actions: projects are shown as the next concrete step, not vague long-term goals.
+- Today's focus: pick the todo or project to focus on from a dropdown (or keep the auto suggestion), type a custom focus duration, plus the focus timer, start button, completion rate, focus minutes, and nearby reminders.
+- Top 3 tasks: the three things that matter most today, each with a draggable completion progress bar.
+- Normal todos: smaller tasks that should not compete with the Top 3, with the same progress bar.
+- Project next actions: projects are shown as the next concrete step, not vague long-term goals, with a draggable progress bar to track how far along they are.
 - Quick links: your common tools, documents, email, calendar, GitHub, AI tools, and custom links.
 - Inbox: a place to drop loose thoughts before organizing them.
 - Reminders and countdowns: bills, deadlines, birthdays, interviews, trips, and other dates.
@@ -18,8 +18,9 @@ It is not a team dashboard, calendar replacement, or heavy productivity system. 
 ## Main Features
 
 - Local dashboard data, no account required.
-- Focus timer with project-level time tracking when you pause, reset, finish naturally, or switch projects.
+- Focus timer: choose this round's target (a todo or a project) from a dropdown and type a custom duration; elapsed time is recorded to the matching project when you pause, reset, finish naturally, or switch, and also to the linked todo when you pick one.
 - Manual ordering for priority tasks and projects.
+- Draggable completion progress bars on today's todos and active projects, in 10% steps; dragging a todo to 100% marks it done and dragging back clears it.
 - Daily quote with a local quote pool.
 - Weather lookup by location or city.
 - Local JSON backup import and export. Exports do not include API keys.
@@ -44,7 +45,7 @@ If there is no release yet, this repository currently provides the source code. 
 
 1. Open the app.
 2. Check the "Today Focus" area first.
-3. Start a focus session from the main focus card or a project card.
+3. On the focus page, pick the todo or project to focus on and set the duration, then start a focus session (you can also start from a project card).
 4. Put unfinished thoughts into the inbox instead of interrupting the current task.
 5. Check reminders when planning your day.
 6. At the end of the day, fill in the review fields, plan tomorrow's tasks, and generate a short summary.
