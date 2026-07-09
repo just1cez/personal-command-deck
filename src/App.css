@@ -6,35 +6,36 @@
 .top-status {
   align-items: stretch;
   display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr 1.15fr 1.75fr;
-  margin: 0 auto 14px;
+  gap: 8px;
+  grid-template-columns: 0.86fr 1fr 1.46fr;
+  margin: 0 auto 8px;
   max-width: 1520px;
 }
 
 .status-block {
   align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--shadow-color) 24%, transparent);
   color: var(--text);
   display: flex;
-  gap: 12px;
-  min-height: 74px;
-  padding: 14px 16px;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 12px;
 }
 
 .status-block svg {
   color: var(--accent);
   flex: 0 0 auto;
+  opacity: 0.78;
 }
 
 .status-block strong {
   color: var(--heading);
   display: block;
-  font-size: 18px;
-  font-weight: 750;
+  font-size: 15px;
+  font-weight: 740;
   line-height: 1.1;
 }
 
@@ -46,7 +47,7 @@
 
 .time-block strong {
   font-family: var(--mono);
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .weather-button,
@@ -222,16 +223,16 @@
 
 .control-strip {
   align-items: center;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--panel) 54%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+  border-radius: 10px;
+  box-shadow: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin: 0 auto 18px;
+  gap: 8px;
+  margin: 0 auto 12px;
   max-width: 1520px;
-  padding: 10px;
+  padding: 7px;
 }
 
 .energy-control,
@@ -240,23 +241,23 @@
 .data-actions,
 .command-trigger {
   align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
   border-radius: 8px;
   color: var(--text);
   display: inline-flex;
-  gap: 9px;
-  min-height: 40px;
-  padding: 0 12px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
 }
 
 .energy-control {
   --energy-color: #45c7ff;
   --energy-soft: rgba(69, 199, 255, 0.16);
   background:
-    linear-gradient(90deg, var(--energy-soft), transparent 64%),
-    var(--surface);
-  border-color: color-mix(in srgb, var(--energy-color) 34%, var(--border));
+    linear-gradient(90deg, color-mix(in srgb, var(--energy-soft) 66%, transparent), transparent 64%),
+    color-mix(in srgb, var(--surface) 78%, transparent);
+  border-color: color-mix(in srgb, var(--energy-color) 24%, var(--border));
   transition:
     background-color 180ms ease,
     border-color 180ms ease,
@@ -371,9 +372,9 @@
   --mode-color: #7aa7ff;
   --mode-soft: rgba(122, 167, 255, 0.14);
   background:
-    linear-gradient(90deg, var(--mode-soft), transparent 70%),
-    var(--surface);
-  border-color: color-mix(in srgb, var(--mode-color) 30%, var(--border));
+    linear-gradient(90deg, color-mix(in srgb, var(--mode-soft) 66%, transparent), transparent 70%),
+    color-mix(in srgb, var(--surface) 78%, transparent);
+  border-color: color-mix(in srgb, var(--mode-color) 22%, var(--border));
 }
 
 .mode-control[data-day-mode='工作日'] {
@@ -485,6 +486,7 @@
 
 .shortcut-settings {
   gap: 7px;
+  opacity: 0.82;
   padding: 0 7px;
 }
 
@@ -507,8 +509,8 @@
 }
 
 .shortcut-settings > input {
-  background: var(--input);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--input) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
   border-radius: 7px;
   color: var(--heading);
   font: inherit;
@@ -560,6 +562,7 @@
 
 .data-actions {
   gap: 6px;
+  opacity: 0.78;
   padding: 0 7px;
 }
 
@@ -751,15 +754,15 @@ kbd {
 }
 
 .main-view-tabs {
-  background: color-mix(in srgb, var(--panel) 86%, transparent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--panel) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--shadow-color) 22%, transparent);
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 16px;
-  padding: 6px;
+  margin-bottom: 12px;
+  padding: 5px;
 }
 
 .main-view-tabs button {
@@ -773,9 +776,9 @@ kbd {
   gap: 2px 8px;
   grid-template-columns: 20px auto;
   justify-content: center;
-  min-height: 48px;
+  min-height: 42px;
   min-width: 0;
-  padding: 7px 12px;
+  padding: 6px 10px;
   text-align: left;
   transition:
     background-color 160ms ease,
@@ -792,11 +795,11 @@ kbd {
 
 .main-view-tabs button.active {
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 72%),
-    var(--surface);
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 72%),
+    color-mix(in srgb, var(--surface) 88%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
   color: var(--heading);
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--shadow-color) 68%, transparent);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--shadow-color) 36%, transparent);
 }
 
 .main-view-tabs svg {
@@ -825,11 +828,11 @@ kbd {
 .main-view-panel {
   align-items: start;
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .start-view {
-  grid-template-columns: minmax(0, 1.42fr) minmax(340px, 0.78fr);
+  grid-template-columns: minmax(0, 1.72fr) minmax(300px, 0.58fr);
 }
 
 .execute-view {
@@ -1295,44 +1298,50 @@ button {
 
 .focus-console {
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 68%),
-    color-mix(in srgb, var(--surface) 86%, var(--panel));
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-radius: var(--radius);
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 68%),
+    color-mix(in srgb, var(--surface) 88%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 12px;
   margin-top: 14px;
-  padding: 14px;
+  padding: 16px;
 }
 
 .focus-start-panel {
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 58%),
+    radial-gradient(
+      circle at 14% 0%,
+      color-mix(in srgb, var(--accent) 20%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 56%),
     linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, transparent), var(--panel)),
     var(--panel);
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
   box-shadow:
-    0 18px 54px color-mix(in srgb, var(--shadow-color, rgba(0, 0, 0, 0.18)) 82%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+    0 26px 72px color-mix(in srgb, var(--shadow-color, rgba(0, 0, 0, 0.18)) 92%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .start-view .focus-start-panel {
-  min-height: 480px;
-  padding: 24px;
+  min-height: 548px;
+  padding: 30px;
 }
 
 .start-view .focus-priority {
-  min-height: 160px;
+  min-height: 190px;
 }
 
 .start-view .focus-priority strong {
-  font-size: clamp(32px, 3.5vw, 48px);
+  font-size: clamp(38px, 4vw, 58px);
+  max-width: 14ch;
 }
 
 .start-view .focus-console {
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .start-view .timer-readout strong {
-  font-size: clamp(42px, 5vw, 64px);
+  font-size: clamp(54px, 5.8vw, 78px);
 }
 
 .start-view .timer-readout span {
@@ -1340,13 +1349,25 @@ button {
 }
 
 .start-view .focus-controls {
-  gap: 10px;
-  grid-template-columns: minmax(150px, 0.44fr) minmax(180px, 0.46fr) minmax(86px, 0.2fr);
+  gap: 12px;
+  grid-template-columns: minmax(132px, 0.32fr) minmax(220px, 0.54fr) minmax(88px, 0.14fr);
 }
 
 .start-view .duration-stepper,
 .start-view .focus-controls > button {
-  min-height: 62px;
+  min-height: 66px;
+}
+
+.start-view .focus-controls .primary-action {
+  border-radius: 10px;
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--accent) 28%, transparent);
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.start-view .focus-controls .secondary-action,
+.start-view .duration-stepper {
+  opacity: 0.76;
 }
 
 .start-view .focus-signals {
@@ -1360,6 +1381,9 @@ button {
 
 .start-view .links-panel {
   align-self: stretch;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--shadow-color) 28%, transparent);
 }
 
 .start-view .quick-grid {
@@ -1369,9 +1393,9 @@ button {
 .timer-readout {
   align-items: center;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 24px auto minmax(0, 1fr);
-  margin-bottom: 12px;
+  gap: 10px;
+  grid-template-columns: 28px auto minmax(0, 1fr);
+  margin-bottom: 14px;
 }
 
 .timer-readout svg {
@@ -1401,8 +1425,8 @@ button {
 
 .duration-stepper {
   align-items: center;
-  background: var(--input);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--input) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
   border-radius: 8px;
   color: var(--heading);
   display: grid;
@@ -1460,40 +1484,42 @@ button {
 
 .focus-priority {
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%),
     var(--surface);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 12px;
   display: grid;
-  gap: 8px;
-  padding: 14px;
+  gap: 12px;
+  padding: 20px;
 }
 
 .focus-priority span,
 .focus-signal span {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0;
 }
 
 .focus-priority strong {
   color: var(--heading);
   font-size: clamp(20px, 2vw, 28px);
   font-weight: 900;
-  line-height: 1.35;
+  line-height: 1.12;
   overflow-wrap: anywhere;
 }
 
 .focus-source {
   align-self: start;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: 999px;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 78%, var(--muted));
   display: inline-flex;
   font-size: 11px;
   font-weight: 850;
   line-height: 1;
+  opacity: 0.82;
   padding: 6px 8px;
 }
 
@@ -1505,8 +1531,8 @@ button {
 }
 
 .focus-signal {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   border-radius: 8px;
   display: grid;
   gap: 4px;
@@ -2004,8 +2030,8 @@ button {
 
 .quick-link-main a {
   align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   border-radius: 8px;
   color: var(--heading);
   display: grid;
@@ -2026,8 +2052,8 @@ button {
 .quick-link-main > button {
   align-items: center;
   align-self: stretch;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   border-radius: 8px;
   color: var(--muted);
   cursor: pointer;
@@ -3727,14 +3753,20 @@ button {
 
   .start-view .focus-priority {
     min-height: auto;
+    padding: 16px;
   }
 
   .start-view .focus-priority strong {
-    font-size: 24px;
+    font-size: 28px;
+    max-width: none;
   }
 
   .start-view .timer-readout strong {
     font-size: 38px;
+  }
+
+  .start-view .focus-controls .primary-action {
+    font-size: 14px;
   }
 
   .status-block {
