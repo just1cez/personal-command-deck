@@ -23,6 +23,8 @@ declare global {
         settings: DesktopSettings
         shortcut: GlobalShortcutStatus
       }>
+      setShortcutCapture?: (active: boolean) => Promise<unknown>
+      notify?: (request: { title: string; body: string }) => Promise<unknown>
     }
   }
 }

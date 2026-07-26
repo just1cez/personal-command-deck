@@ -120,7 +120,8 @@ export const formatMinutes = (seconds: number) => {
 export const daysUntil = (dateString: string) => {
   const today = startOfLocalDay()
   const target = parseLocalDate(dateString)
-  return Math.ceil((target.getTime() - today.getTime()) / 86_400_000)
+  // 两端都是本地零点，round 可消化跨夏令时产生的 ±1 小时偏差
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000)
 }
 
 export const clampProgress = (value: number) => {

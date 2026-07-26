@@ -34,6 +34,7 @@ import {
   IconByName,
   OrderControls,
   PanelTitle,
+  ShortcutRecorder,
   TaskRow,
   ThemedSelect,
 } from './components'
@@ -54,6 +55,7 @@ import type {
   WeatherPosition,
 } from './types'
 import {
+  addFocusSecondsToProject,
   aiProviderDefaults,
   aiProviderOptions,
   createBackupState,
@@ -65,6 +67,7 @@ import {
   normalizeDashboardState,
   pickQuoteId,
   resolveDailyQuote,
+  secondsToDisplayMinutes,
   STORAGE_KEY,
   themeOptions,
 } from './dashboardState'
@@ -203,7 +206,29 @@ const getFocusSegmentSeconds = (startedAt?: string, endsAt?: string) => {
   )
 }
 
-const secondsToDisplayMinutes = (seconds: number) => Math.floor(seconds / 60)
+const requestWebNotificationPermission = () => {
+  if (window.commandDeck) return
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission === 'default') {
+    void Notification.requestPermission().catch(() => undefined)
+  }
+}
+
+const notifyFocusComplete = (taskLabel: string, detail: string) => {
+  const title = '专注完成'
+  const body = detail || (taskLabel ? `「${taskLabel}」这一轮已结束` : '这一轮专注已结束')
+  if (window.commandDeck?.notify) {
+    void window.commandDeck.notify({ title, body }).catch(() => undefined)
+    return
+  }
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try {
+      new Notification(title, { body })
+    } catch {
+      // 桌面通知不可用时，界面内的记录提示仍然可见
+    }
+  }
+}
 
 const retentionOptions = [
   { value: '0', label: '永久保留' },
@@ -257,6 +282,7 @@ function RetentionControls({
   value: number
   onChange: (value: string) => void
 }) {
+  const [draft, setDraft] = useState<string | null>(null)
   const selectValue = String(value)
   const options = retentionSelectOptions.some((option) => option.value === selectValue)
     ? retentionSelectOptions
@@ -288,8 +314,13 @@ function RetentionControls({
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
-            value={value}
-            onChange={(event) => onChange(event.target.value.replace(/\D/g, ''))}
+            value={draft ?? String(value)}
+            onChange={(event) => setDraft(event.target.value.replace(/\D/g, ''))}
+            onBlur={() => {
+              if (draft === null) return
+              onChange(draft)
+              setDraft(null)
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.currentTarget.blur()
@@ -319,18 +350,6 @@ function RetentionControls({
       </label>
     </>
   )
-}
-
-const addFocusSecondsToProject = (project: Project, seconds: number): Project => {
-  const focusSeconds = Math.max(
-    0,
-    (project.focusSeconds ?? project.minutes * 60) + Math.max(0, seconds),
-  )
-  return {
-    ...project,
-    focusSeconds,
-    minutes: secondsToDisplayMinutes(focusSeconds),
-  }
 }
 
 const formatFocusRecordNotice = (projectName: string, seconds: number) => {
@@ -541,6 +560,12 @@ function App() {
   }, [dashboard])
 
   useEffect(() => {
+    if (!dataNotice) return
+    const timeout = window.setTimeout(() => setDataNotice(''), 6000)
+    return () => window.clearTimeout(timeout)
+  }, [dataNotice])
+
+  useEffect(() => {
     let cancelled = false
     const loadDesktopSettings = async () => {
       if (!window.commandDeck?.getDesktopSettings) {
@@ -587,6 +612,8 @@ function App() {
           )
           const tasks = settleFocusTask(current, current.focus.taskId, elapsedSeconds)
           if (notice) window.setTimeout(() => setDataNotice(notice), 0)
+          const finishedLabel = current.focus.taskLabel
+          window.setTimeout(() => notifyFocusComplete(finishedLabel, notice), 0)
           return {
             ...current,
             projects,
@@ -1423,21 +1450,22 @@ function App() {
   }
 
   const startFocus = useCallback((projectId = dashboard.focus.projectId, taskLabel = '', taskId = '') => {
-    const project =
-      dashboard.projects.find((item) => item.id === projectId) ?? dashboard.projects[0]
-    if (!project) return
-
+    requestWebNotificationPermission()
     updateDashboard((current) => {
-      const nextLabel = taskLabel || project.nextAction
+      const project = current.projects.find(
+        (item) => item.id === projectId && item.active !== false,
+      )
+      const nextProjectId = project?.id ?? ''
+      const nextLabel = taskLabel || project?.nextAction || '自由专注'
       const isSwitchingRunningFocus =
         current.focus.running &&
-        (current.focus.projectId !== project.id || current.focus.taskLabel !== nextLabel)
+        (current.focus.projectId !== nextProjectId || current.focus.taskLabel !== nextLabel)
       const elapsedSeconds = isSwitchingRunningFocus
         ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
         : 0
       const isSamePausedFocus =
         !current.focus.running &&
-        current.focus.projectId === project.id &&
+        current.focus.projectId === nextProjectId &&
         current.focus.taskLabel === nextLabel &&
         current.focus.secondsLeft > 0 &&
         current.focus.secondsLeft < current.focus.durationMinutes * 60
@@ -1460,7 +1488,7 @@ function App() {
         focus: {
           ...current.focus,
           running: true,
-          projectId: project.id,
+          projectId: nextProjectId,
           taskLabel: nextLabel,
           taskId: isSamePausedFocus ? current.focus.taskId : taskId,
           secondsLeft,
@@ -1469,7 +1497,7 @@ function App() {
         },
       }
     })
-  }, [dashboard.focus.projectId, dashboard.projects, updateDashboard])
+  }, [dashboard.focus.projectId, updateDashboard])
 
   const openProjectFocusDialog = useCallback((project: Project) => {
     setPendingFocusProjectId(project.id)
@@ -1479,6 +1507,7 @@ function App() {
 
   const startPendingProjectFocus = useCallback(() => {
     if (!pendingFocusProject) return
+    requestWebNotificationPermission()
     const durationMinutes = Math.min(120, Math.max(5, pendingFocusMinutes))
     updateDashboard((current) => {
       const project = current.projects.find((item) => item.id === pendingFocusProject.id)
@@ -1681,9 +1710,36 @@ function App() {
     value: string,
   ) => {
     const days = clampRetentionDays(Number(value))
+    if (days === dashboard.retention[key]) return
+
+    const nowTime = Date.now()
+    const nextRetention = { ...dashboard.retention, [key]: days }
+    const prunedArchives = dashboard.archives.filter(
+      (archive) =>
+        !isWithinRetentionWindow(archive.createdAt, nextRetention.reviewArchiveDays, nowTime),
+    ).length
+    const prunedProjects = dashboard.projects.filter(
+      (project) =>
+        project.active === false &&
+        !isWithinRetentionWindow(
+          project.completedAt,
+          nextRetention.completedProjectDays,
+          nowTime,
+        ),
+    ).length
+    const prunedTotal = prunedArchives + prunedProjects
+    if (prunedTotal > 0) {
+      const confirmed = window.confirm(
+        `按新设置会立即清理 ${prunedTotal} 条本机记录（复盘归档 ${prunedArchives} 条、已结项项目 ${prunedProjects} 条），删除后无法恢复。确认继续？`,
+      )
+      if (!confirmed) {
+        setDataNotice('已取消修改保留天数')
+        return
+      }
+    }
+
     updateDashboard((current) => {
       const retention = { ...current.retention, [key]: days }
-      const nowTime = Date.now()
       return {
         ...current,
         retention,
@@ -1721,7 +1777,15 @@ function App() {
     setDataNotice('已删除这条复盘归档')
   }
 
-  const saveGlobalShortcut = async (enabled = shortcutStatus.enabled) => {
+  const setShortcutCapture = useCallback((capturing: boolean) => {
+    if (!window.commandDeck?.setShortcutCapture) return
+    void window.commandDeck.setShortcutCapture(capturing).catch(() => undefined)
+  }, [])
+
+  const saveGlobalShortcut = async (
+    enabled = shortcutStatus.enabled,
+    accelerator = shortcutInput,
+  ) => {
     if (!window.commandDeck?.updateGlobalShortcut) {
       setShortcutNotice('快捷键设置仅在桌面版可用')
       return
@@ -1730,7 +1794,7 @@ function App() {
     try {
       const response = await window.commandDeck.updateGlobalShortcut({
         enabled,
-        accelerator: shortcutInput.trim(),
+        accelerator: accelerator.trim(),
       })
       setShortcutStatus(response.shortcut)
       setShortcutInput(response.shortcut.accelerator)
@@ -2050,30 +2114,15 @@ function App() {
             />
             <span>呼出</span>
           </label>
-          <input
+          <ShortcutRecorder
             value={shortcutInput}
-            aria-label="全局呼出快捷键"
-            placeholder="CommandOrControl+Shift+Space"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
             disabled={!window.commandDeck?.updateGlobalShortcut || shortcutLoading}
-            onChange={(event) => setShortcutInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                void saveGlobalShortcut()
-              }
+            onRecordingChange={setShortcutCapture}
+            onCapture={(accelerator) => {
+              setShortcutInput(accelerator)
+              void saveGlobalShortcut(true, accelerator)
             }}
           />
-          <button
-            type="button"
-            disabled={!window.commandDeck?.updateGlobalShortcut || shortcutLoading}
-            title="保存托盘呼出快捷键"
-            onClick={() => void saveGlobalShortcut()}
-          >
-            <Command size={15} />
-            保存
-          </button>
           <small className={shortcutStatus.registered ? 'ok' : ''}>
             {shortcutNotice || (shortcutStatus.registered ? '已启用' : '未启用')}
           </small>

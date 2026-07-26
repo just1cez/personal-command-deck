@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -8,6 +8,7 @@ import {
   Circle,
   FileText,
   Globe2,
+  Keyboard,
   Link,
   Mail,
   Minus,
@@ -20,6 +21,7 @@ import {
   Sun,
   TimerReset,
   Trash2,
+  X,
   Zap,
 } from 'lucide-react'
 import type { DashboardState, SelectOption, Task } from './types'
@@ -442,6 +444,183 @@ export function ThemedSelect({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+const shortcutDisplayNames: Record<string, string> = {
+  CommandOrControl: 'Ctrl',
+  CmdOrCtrl: 'Ctrl',
+  Control: 'Ctrl',
+  Ctrl: 'Ctrl',
+  Command: 'Cmd',
+  Alt: 'Alt',
+  Option: 'Alt',
+  Shift: 'Shift',
+  Super: 'Win',
+  Meta: 'Win',
+}
+
+const formatAccelerator = (accelerator: string) =>
+  accelerator
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => shortcutDisplayNames[part] ?? part)
+    .join(' + ')
+
+// 与 electron/main.cjs 的 isSafeAccelerator 保持一致：只产出白名单里的按键名
+const acceleratorKeyByCode: Record<string, string> = {
+  Space: 'Space',
+  Tab: 'Tab',
+  Enter: 'Enter',
+  NumpadEnter: 'Enter',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  Insert: 'Insert',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  Minus: '-',
+  Equal: '=',
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backquote: '`',
+  Backslash: '\\',
+}
+
+const acceleratorKeyFromEvent = (event: KeyboardEvent) => {
+  const { code } = event
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+  if (/^Digit\d$/.test(code)) return code.slice(5)
+  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(code)) return code
+  return acceleratorKeyByCode[code] ?? ''
+}
+
+const modifiersFromEvent = (event: KeyboardEvent) =>
+  [
+    event.ctrlKey ? 'CommandOrControl' : '',
+    event.altKey ? 'Alt' : '',
+    event.shiftKey ? 'Shift' : '',
+    event.metaKey ? 'Super' : '',
+  ].filter(Boolean)
+
+export function ShortcutRecorder({
+  value,
+  disabled,
+  onCapture,
+  onRecordingChange,
+}: {
+  value: string
+  disabled: boolean
+  onCapture: (accelerator: string) => void
+  onRecordingChange?: (recording: boolean) => void
+}) {
+  const [recording, setRecording] = useState(false)
+  const [previewModifiers, setPreviewModifiers] = useState<string[]>([])
+  const [needsModifier, setNeedsModifier] = useState(false)
+
+  const stopRecording = useCallback(() => {
+    setRecording(false)
+    setPreviewModifiers([])
+    setNeedsModifier(false)
+  }, [])
+
+  useEffect(() => {
+    if (!recording) return
+    onRecordingChange?.(true)
+    return () => onRecordingChange?.(false)
+  }, [recording, onRecordingChange])
+
+  useEffect(() => {
+    if (!recording) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.key === 'Escape') {
+        stopRecording()
+        return
+      }
+      const modifiers = modifiersFromEvent(event)
+      const key = acceleratorKeyFromEvent(event)
+      if (!key) {
+        setPreviewModifiers(modifiers)
+        setNeedsModifier(false)
+        return
+      }
+      if (!modifiers.length) {
+        setPreviewModifiers([])
+        setNeedsModifier(true)
+        return
+      }
+      stopRecording()
+      onCapture([...modifiers, key].join('+'))
+    }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setPreviewModifiers(modifiersFromEvent(event))
+    }
+    const handleWindowBlur = () => stopRecording()
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('keyup', handleKeyUp, true)
+    window.addEventListener('blur', handleWindowBlur)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('keyup', handleKeyUp, true)
+      window.removeEventListener('blur', handleWindowBlur)
+    }
+  }, [recording, onCapture, stopRecording])
+
+  const displayValue = recording
+    ? previewModifiers.length
+      ? `${formatAccelerator(previewModifiers.join('+'))} + …`
+      : needsModifier
+        ? '需要搭配 Ctrl / Alt / Shift'
+        : '按下组合键…'
+    : formatAccelerator(value) || '未设置'
+
+  return (
+    <div
+      className={['shortcut-recorder', recording ? 'recording' : '']
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <span
+        className="shortcut-recorder-value"
+        title={recording ? '正在录制快捷键，Esc 取消' : value}
+        aria-live="polite"
+      >
+        {displayValue}
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        title={recording ? '取消录制 (Esc)' : '录制新的呼出快捷键'}
+        aria-label={recording ? '取消录制快捷键' : '录制新的呼出快捷键'}
+        onClick={() => {
+          if (recording) {
+            stopRecording()
+          } else {
+            setRecording(true)
+          }
+        }}
+      >
+        {recording ? <X size={14} /> : <Keyboard size={14} />}
+        {recording ? '取消' : '修改'}
+      </button>
     </div>
   )
 }

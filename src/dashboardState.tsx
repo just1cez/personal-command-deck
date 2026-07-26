@@ -139,6 +139,20 @@ export const pickQuoteId = (quotes: Quote[], excludedId?: string) => {
 export const getQuoteById = (quotes: Quote[], quoteId: string) =>
   quotes.find((quote) => quote.id === quoteId && quote.enabled)
 
+export const secondsToDisplayMinutes = (seconds: number) => Math.floor(seconds / 60)
+
+export const addFocusSecondsToProject = (project: Project, seconds: number): Project => {
+  const focusSeconds = Math.max(
+    0,
+    (project.focusSeconds ?? project.minutes * 60) + Math.max(0, seconds),
+  )
+  return {
+    ...project,
+    focusSeconds,
+    minutes: secondsToDisplayMinutes(focusSeconds),
+  }
+}
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
@@ -414,7 +428,7 @@ const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] =
       return task
     })
     .filter((task): task is Task => Boolean(task))
-  return tasks.length ? tasks : fallback
+  return tasks
 }
 
 const normalizeProjects = (value: unknown): Project[] => {
@@ -450,7 +464,7 @@ const normalizeProjects = (value: unknown): Project[] => {
       return project
     })
     .filter((project): project is Project => Boolean(project))
-  return projects.length ? projects : defaultState.projects
+  return projects
 }
 
 const normalizeQuickLinks = (value: unknown): QuickLink[] => {
@@ -470,7 +484,7 @@ const normalizeQuickLinks = (value: unknown): QuickLink[] => {
       }
     })
     .filter((link): link is QuickLink => Boolean(link))
-  return links.length ? links : defaultState.quickLinks
+  return links
 }
 
 const normalizeInbox = (value: unknown, fallback = defaultState.inbox): InboxItem[] => {
@@ -504,7 +518,7 @@ const normalizeReminders = (value: unknown): Reminder[] => {
       }
     })
     .filter((reminder): reminder is Reminder => Boolean(reminder))
-  return reminders.length ? reminders : defaultState.reminders
+  return reminders
 }
 
 const normalizeArchives = (value: unknown): DailyArchive[] => {
@@ -617,6 +631,40 @@ export const normalizeDashboardState = (
   const tasks = normalizeTasks(parsed.tasks)
   const taskIds = new Set(tasks.map((task) => task.id))
 
+  const focusProjectIdRaw = textValue(parsed.focus?.projectId)
+  const focusProjectId = projectIds.has(focusProjectIdRaw) ? focusProjectIdRaw : ''
+  const focusTaskIdRaw = textValue(parsed.focus?.taskId)
+  const focusTaskId = taskIds.has(focusTaskIdRaw) ? focusTaskIdRaw : ''
+
+  // 上次会话若在计时中退出，把已经过去的时间段补记回项目与任务，再落回暂停态
+  const startedAtTime = new Date(textValue(parsed.focus?.startedAt)).getTime()
+  const endsAtTime = new Date(textValue(parsed.focus?.endsAt)).getTime()
+  const wasRunning =
+    booleanValue(parsed.focus?.running) &&
+    Number.isFinite(startedAtTime) &&
+    Number.isFinite(endsAtTime) &&
+    endsAtTime > startedAtTime
+  const offlineSeconds = wasRunning
+    ? Math.max(0, Math.floor((Math.min(now, endsAtTime) - startedAtTime) / 1000))
+    : 0
+  const focusExpired = wasRunning && now >= endsAtTime
+  const settledProjects =
+    offlineSeconds > 0 && focusProjectId
+      ? retainedProjects.map((project) =>
+          project.id === focusProjectId
+            ? addFocusSecondsToProject(project, offlineSeconds)
+            : project,
+        )
+      : retainedProjects
+  const settledTasks =
+    offlineSeconds > 0 && focusTaskId
+      ? tasks.map((task) =>
+          task.id === focusTaskId
+            ? { ...task, focusSeconds: Math.max(0, (task.focusSeconds ?? 0) + offlineSeconds) }
+            : task,
+        )
+      : tasks
+
   return {
     quotePoolVersion: quotes.quotePoolVersion,
     quotePool: quotes.quotePool,
@@ -635,10 +683,12 @@ export const normalizeDashboardState = (
       : defaultState.dayMode,
     energy: clampNumber(parsed.energy, 1, 5, defaultState.energy),
     weather: normalizeWeather(parsed.weather),
-    currentFocus: textValue(parsed.currentFocus, defaultState.currentFocus),
-    tasks,
+    currentFocus: focusExpired
+      ? '等待下一次启动'
+      : textValue(parsed.currentFocus, defaultState.currentFocus),
+    tasks: settledTasks,
     tomorrowTasks: normalizeTasks(parsed.tomorrowTasks, []),
-    projects: retainedProjects,
+    projects: settledProjects,
     quickLinks: normalizeQuickLinks(parsed.quickLinks),
     inbox: normalizeInbox(parsed.inbox),
     reminders: normalizeReminders(parsed.reminders),
@@ -660,21 +710,19 @@ export const normalizeDashboardState = (
     focus: {
       running: false,
       durationMinutes,
-      secondsLeft: clampNumber(
-        parsed.focus?.secondsLeft,
-        0,
-        durationMinutes * 60,
-        durationMinutes * 60,
-      ),
-      projectId:
-        textValue(parsed.focus?.projectId) && projectIds.has(textValue(parsed.focus?.projectId))
-          ? textValue(parsed.focus?.projectId)
-          : '',
-      taskLabel: textValue(parsed.focus?.taskLabel),
-      taskId:
-        textValue(parsed.focus?.taskId) && taskIds.has(textValue(parsed.focus?.taskId))
-          ? textValue(parsed.focus?.taskId)
-          : '',
+      secondsLeft: wasRunning
+        ? focusExpired
+          ? durationMinutes * 60
+          : Math.min(durationMinutes * 60, Math.max(1, Math.ceil((endsAtTime - now) / 1000)))
+        : clampNumber(
+            parsed.focus?.secondsLeft,
+            0,
+            durationMinutes * 60,
+            durationMinutes * 60,
+          ),
+      projectId: focusProjectId,
+      taskLabel: focusExpired ? '' : textValue(parsed.focus?.taskLabel),
+      taskId: focusExpired ? '' : focusTaskId,
       endsAt: undefined,
       startedAt: undefined,
     },

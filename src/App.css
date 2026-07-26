@@ -508,17 +508,34 @@
   width: 15px;
 }
 
-.shortcut-settings > input {
+.shortcut-recorder {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.shortcut-recorder-value {
+  align-items: center;
   background: color-mix(in srgb, var(--input) 76%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
   border-radius: 7px;
   color: var(--heading);
-  font: inherit;
+  display: inline-flex;
   font-family: var(--mono);
   font-size: 12px;
   height: 30px;
-  min-width: 210px;
+  min-width: 170px;
+  overflow: hidden;
   padding: 0 9px;
+  text-overflow: ellipsis;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.shortcut-recorder.recording .shortcut-recorder-value {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
 }
 
 .shortcut-settings button {
@@ -540,8 +557,7 @@
   color: var(--accent);
 }
 
-.shortcut-settings button:disabled,
-.shortcut-settings input:disabled {
+.shortcut-settings button:disabled {
   cursor: not-allowed;
   opacity: 0.56;
 }
@@ -3938,7 +3954,11 @@ button {
     width: 100%;
   }
 
-  .shortcut-settings > input {
+  .shortcut-recorder {
+    flex: 1;
+  }
+
+  .shortcut-recorder-value {
     flex: 1;
     min-width: 0;
   }

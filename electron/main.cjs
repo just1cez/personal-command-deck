@@ -2,6 +2,7 @@ const {
   app,
   BrowserWindow,
   Menu,
+  Notification,
   Tray,
   dialog,
   globalShortcut,
@@ -16,6 +17,11 @@ const path = require('node:path')
 const isDev = process.env.VITE_DEV_SERVER_URL
 const appIconPath = path.join(__dirname, 'assets', 'app.ico')
 const trayIconPath = path.join(__dirname, 'assets', 'tray.png')
+
+// Windows toast 通知需要 AppUserModelId 才能正常显示
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.personal.commanddeck')
+}
 
 let mainWindow = null
 let tray = null
@@ -312,6 +318,15 @@ function createWindow() {
     return { action: 'deny' }
   })
 
+  // 阻止主窗口本身跳转到外部页面（例如拖入链接），外链一律交给系统浏览器
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
+  })
+
   if (isDev) {
     mainWindow.loadURL(isDev)
   } else {
@@ -361,11 +376,33 @@ ipcMain.handle('ai:summary', async (_event, request) => {
   return { content }
 })
 
+ipcMain.handle('app:notify', (_event, request) => {
+  if (!Notification.isSupported()) return { shown: false }
+  const title =
+    String(request?.title ?? '').trim().slice(0, 80) || 'Personal Command Deck'
+  const body = String(request?.body ?? '').trim().slice(0, 200)
+  const notification = new Notification({ title, body, icon: appIconPath })
+  notification.on('click', showMainWindow)
+  notification.show()
+  return { shown: true }
+})
+
 ipcMain.handle('settings:get', async () => {
   return {
     settings: readSettings(),
     shortcut: getShortcutStatus(),
   }
+})
+
+// 录制新快捷键期间挂起已注册的全局热键，否则按下当前组合键会被系统级热键
+// 吞掉，键盘事件到不了渲染进程，录制器收不到输入
+ipcMain.handle('settings:set-shortcut-capture', (_event, active) => {
+  if (active) {
+    globalShortcut.unregisterAll()
+    registeredShortcut = ''
+    return { shortcut: getShortcutStatus() }
+  }
+  return { shortcut: registerGlobalShortcut() }
 })
 
 ipcMain.handle('settings:update-global-shortcut', async (_event, request) => {
