@@ -12,6 +12,7 @@ It is not a team dashboard, calendar replacement, or heavy productivity system. 
 - Project next actions: projects are shown as the next concrete step, not vague long-term goals, with a draggable progress bar to track how far along they are.
 - Quick links: your common tools, documents, email, calendar, GitHub, AI tools, and custom links.
 - Inbox: a place to drop loose thoughts before organizing them.
+- Desktop notes: create a note or convert an inbox item into a separate window with autosave, colors, always-on-top mode, restored window placement, and actions for adding it to today's or tomorrow's tasks.
 - Reminders and countdowns: bills, deadlines, birthdays, interviews, trips, and other dates.
 - End-of-day review: today's receipt, what moved, what got stuck, tomorrow's first step, next-day tasks, and recent archives.
 
@@ -29,6 +30,7 @@ It is not a team dashboard, calendar replacement, or heavy productivity system. 
 - Local retention settings for daily review archives and completed projects, plus manual deletion for individual review archives.
 - Single-instance desktop behavior: opening the shortcut while the app is in the tray brings back the existing window instead of starting a second empty instance.
 - Customizable global shortcut for bringing the main window back from the tray or background.
+- Desktop-note windows stay out of taskbar thumbnail groups; closing a note with content hides it, while an empty note is cleaned up automatically.
 - Windows desktop installer with selectable install location.
 
 ## Install
@@ -46,7 +48,7 @@ If there is no release yet, this repository currently provides the source code. 
 1. Open the app.
 2. Check the "Today Focus" area first.
 3. On the focus page, pick the todo or project to focus on and set the duration, then start a focus session (you can also start from a project card).
-4. Put unfinished thoughts into the inbox instead of interrupting the current task.
+4. Put unfinished thoughts into the inbox, then turn one into a desktop note when it needs to remain visible.
 5. Check reminders when planning your day.
 6. At the end of the day, fill in the review fields, plan tomorrow's tasks, and generate a short summary.
 7. Archive the day, then revisit it from recent archives.
@@ -69,7 +71,7 @@ API keys are stored locally in the app runtime. This is convenient for personal 
 
 ## Data and Privacy
 
-- Your dashboard data is stored locally in localStorage.
+- Your dashboard data, including desktop-note content, colors, and window state, is stored locally in localStorage.
 - The app does not require login.
 - The app does not use a hosted backend.
 - Weather lookup calls public weather/location APIs when you use weather features.
@@ -81,6 +83,8 @@ API keys are stored locally in the app runtime. This is convenient for personal 
 - Global shortcut settings are stored in the local desktop configuration and are not written to backup files.
 
 ## For Developers
+
+Node.js 22.12 or newer is required.
 
 Install dependencies:
 

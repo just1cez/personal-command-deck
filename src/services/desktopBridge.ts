@@ -1,5 +1,6 @@
 /**
- * Electron 预加载脚本暴露的桥接接口（`electron/preload.cjs` -> `window.commandDeck`）。
+ * Electron 预加载脚本暴露的桥接接口（主窗口用 `preload.cjs`，便笺用最小权限的
+ * `note-preload.cjs`，两者都挂到 `window.commandDeck`）。
  *
  * Web 端不存在这个对象，因此**每个能力都要单独探测**，不能只判断 `window.commandDeck`——
  * 桌面版升级过程中也可能出现"有桥接但缺某个方法"的情况。
@@ -11,6 +12,7 @@
 import type {
   AiSummaryRequest,
   AiSummaryResponse,
+  DesktopNote,
   DesktopSettings,
   GlobalShortcutSettings,
   GlobalShortcutStatus,
@@ -22,11 +24,15 @@ export type DesktopSettingsPayload = {
   shortcut: GlobalShortcutStatus
 }
 
+export type DesktopNoteCommand =
+  | { type: 'patch'; id: string; patch: Partial<DesktopNote> }
+  | { type: 'closed' | 'delete' | 'add-today' | 'add-tomorrow'; id: string }
+
 export type CommandDeckBridge = {
   /** 由主进程代发 AI 请求，避免渲染进程直接暴露 API Key。 */
-  generateAiSummary: (request: AiSummaryRequest) => Promise<AiSummaryResponse>
-  getDesktopSettings: () => Promise<DesktopSettingsPayload>
-  updateGlobalShortcut: (request: GlobalShortcutSettings) => Promise<DesktopSettingsPayload>
+  generateAiSummary?: (request: AiSummaryRequest) => Promise<AiSummaryResponse>
+  getDesktopSettings?: () => Promise<DesktopSettingsPayload>
+  updateGlobalShortcut?: (request: GlobalShortcutSettings) => Promise<DesktopSettingsPayload>
   /**
    * 录制快捷键期间挂起全局热键。
    * 否则用户按下的组合键会被已注册的热键抢走，永远录不进来。
@@ -34,6 +40,22 @@ export type CommandDeckBridge = {
   setShortcutCapture?: (active: boolean) => Promise<unknown>
   /** 发送系统通知（Windows toast）。 */
   notify?: (request: { title: string; body: string }) => Promise<unknown>
+  markStorageChanged?: () => void
+  syncDesktopNotes?: (notes: DesktopNote[]) => Promise<{ synced: boolean }>
+  getDesktopNote?: (noteId: string) => Promise<DesktopNote | null>
+  showDesktopNote?: (noteId: string) => Promise<{ shown: boolean }>
+  patchDesktopNote?: (
+    noteId: string,
+    patch: Partial<Pick<DesktopNote, 'content' | 'color' | 'alwaysOnTop'>>,
+  ) => Promise<{ accepted: boolean }>
+  /** 关闭窗口前同步提交最后一版文字，避免系统关闭手势早于防抖保存。 */
+  flushDesktopNote?: (noteId: string, content: string) => void
+  runDesktopNoteAction?: (
+    noteId: string,
+    action: 'close' | 'delete' | 'add-today' | 'add-tomorrow',
+  ) => Promise<{ accepted: boolean }>
+  onDesktopNoteCommand?: (callback: (command: DesktopNoteCommand) => void) => () => void
+  onDesktopNoteSnapshot?: (callback: (note: DesktopNote) => void) => () => void
 }
 
 declare global {
@@ -60,3 +82,6 @@ export const setShortcutCapture = (active: boolean) => {
   if (!bridge?.setShortcutCapture) return
   void bridge.setShortcutCapture(active).catch(() => undefined)
 }
+
+/** 通知桌面主进程在短时间内把 localStorage 刷到磁盘；Web 端静默忽略。 */
+export const requestStorageFlush = () => window.commandDeck?.markStorageChanged?.()

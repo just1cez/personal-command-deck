@@ -23,18 +23,29 @@ import { ProjectFocusDialog } from './overlays/ProjectFocusDialog'
 import { QuoteManagerDialog } from './overlays/QuoteManagerDialog'
 import { useClock } from './hooks/useClock'
 import { useFocusTimer } from './hooks/useFocusTimer'
+import { useDesktopNoteWindows } from './hooks/useDesktopNoteWindows'
 import {
   useDailyCarryover,
   useDailyQuoteSync,
   useRetentionSweep,
 } from './hooks/useHousekeeping'
 import { DeckProvider } from './state/DeckProvider'
-import { useDeckUi } from './state/deckContext'
+import { useDashboardStore, useDeckUi } from './state/deckContext'
 import { formatLocalDate } from './utils'
 import { StartView } from './views/StartView'
 import { ExecuteView } from './views/ExecuteView'
 import { ReviewView } from './views/ReviewView'
 import './App.css'
+
+function ExecuteNoticeToast() {
+  const { notice } = useDashboardStore()
+  if (!notice) return null
+  return (
+    <div className="execute-notice-toast" role="status" aria-live="polite">
+      {notice}
+    </div>
+  )
+}
 
 function AppShell() {
   const { activeMainView } = useDeckUi()
@@ -43,6 +54,7 @@ function AppShell() {
   const now = useClock()
 
   useFocusTimer()
+  useDesktopNoteWindows()
   useDailyQuoteSync()
   useDailyCarryover(formatLocalDate(now))
   useRetentionSweep()
@@ -57,6 +69,7 @@ function AppShell() {
       {activeMainView === 'start' && <StartView />}
       {activeMainView === 'execute' && <ExecuteView />}
       {activeMainView === 'review' && <ReviewView />}
+      {activeMainView === 'execute' && <ExecuteNoticeToast />}
 
       {/* 浮层统一挂在最外层：触发点可能在任意视图，渲染位置必须固定。 */}
       <CommandPalette />

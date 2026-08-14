@@ -18,6 +18,9 @@ import {
   FOCUS_MINUTES_MIN,
   FOCUS_MINUTES_TOTAL_MAX,
   FOCUS_SECONDS_MAX,
+  DESKTOP_NOTE_CONTENT_MAX_LENGTH,
+  DESKTOP_NOTE_LIMIT,
+  DESKTOP_NOTE_OPEN_LIMIT,
   IDLE_FOCUS_LABEL,
   RETENTION_MAX_DAYS,
 } from '../config/constants'
@@ -31,14 +34,18 @@ import {
   selectableLinkIcons,
   validAiProviders,
   validDayModes,
+  validDesktopNoteColors,
   validThemes,
 } from '../config/options'
+import { normalizeDesktopNoteBounds } from '../domain/desktopNotes'
 import { applyRetentionPolicy } from '../domain/retention'
 import type {
   AiProvider,
   DailyArchive,
   DashboardState,
   DayMode,
+  DesktopNote,
+  DesktopNoteColor,
   InboxItem,
   Project,
   QuickLink,
@@ -102,6 +109,55 @@ const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] =
   // 用户可能就是想把列表清空，不能再拿示例数据把它填回去。
   // fallback 只在字段整个缺失（首次使用）时生效。
   return tasks
+}
+
+const normalizeDesktopNotes = (value: unknown): DesktopNote[] => {
+  if (!Array.isArray(value)) return defaultState.desktopNotes
+
+  const seenIds = new Set<string>()
+  const notes = value
+    .slice(0, DESKTOP_NOTE_LIMIT)
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+
+      let id = trimmedText(item.id) || uid()
+      if (seenIds.has(id)) id = uid()
+      seenIds.add(id)
+
+      const now = new Date().toISOString()
+      const createdAt = isIsoDateTime(item.createdAt) ? item.createdAt : now
+      const updatedAt = isIsoDateTime(item.updatedAt) ? item.updatedAt : createdAt
+      const color = validDesktopNoteColors.has(item.color as DesktopNoteColor)
+        ? (item.color as DesktopNoteColor)
+        : 'yellow'
+      const rawBounds = isPlainObject(item.bounds) ? item.bounds : undefined
+
+      return {
+        id,
+        content: textValue(item.content).slice(0, DESKTOP_NOTE_CONTENT_MAX_LENGTH),
+        color,
+        createdAt,
+        updatedAt,
+        isOpen: booleanValue(item.isOpen),
+        alwaysOnTop: booleanValue(item.alwaysOnTop),
+        bounds: normalizeDesktopNoteBounds(rawBounds),
+      } satisfies DesktopNote
+    })
+    .filter((note): note is DesktopNote => Boolean(note))
+
+  // 历史版本允许反复新建空白便笺。只保留一张（优先保留正在打开的），
+  // 避免用户误以为同一张便笺被重复渲染。
+  const emptyNote =
+    notes.find((note) => !note.content.trim() && note.isOpen) ??
+    notes.find((note) => !note.content.trim())
+  let openCount = 0
+  return notes
+    .filter((note) => note.content.trim() || note.id === emptyNote?.id)
+    .map((note) => {
+      if (!note.isOpen) return note
+      openCount += 1
+      return openCount <= DESKTOP_NOTE_OPEN_LIMIT ? note : { ...note, isOpen: false }
+    })
 }
 
 const normalizeProjects = (value: unknown): Project[] => {
@@ -339,6 +395,7 @@ export const normalizeDashboardState = (
     projects: restoredFocus.projects,
     quickLinks: normalizeQuickLinks(parsed.quickLinks),
     inbox: normalizeInbox(parsed.inbox),
+    desktopNotes: normalizeDesktopNotes(parsed.desktopNotes),
     reminders: normalizeReminders(parsed.reminders),
     review: {
       did: textValue(parsed.review?.did),

@@ -30,12 +30,13 @@ export const useDesktopShortcut = () => {
     let cancelled = false
 
     const loadDesktopSettings = async () => {
-      if (!canReadDesktopSettings()) {
+      const readSettings = getDesktopBridge()?.getDesktopSettings
+      if (!canReadDesktopSettings() || !readSettings) {
         setNotice(NOTICE.shortcutDesktopOnly)
         return
       }
       try {
-        const response = await getDesktopBridge()!.getDesktopSettings()
+        const response = await readSettings()
         if (cancelled) return
         setStatus(response.shortcut)
         setAccelerator(response.shortcut.accelerator)

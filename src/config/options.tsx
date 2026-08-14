@@ -28,7 +28,14 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react'
-import type { AiProvider, DayMode, MainView, SelectOption, Theme } from '../types'
+import type {
+  AiProvider,
+  DayMode,
+  DesktopNoteColor,
+  MainView,
+  SelectOption,
+  Theme,
+} from '../types'
 
 /* -------------------------------------------------------------------------- */
 /* 主视图                                                                      */
@@ -73,6 +80,25 @@ export const themeOptions: SelectOption[] = [
 /** 供 state/normalize.ts 校验历史数据用；与上面的选项列表自动保持一致。 */
 export const validThemes = new Set(themeOptions.map((option) => option.value as Theme))
 export const validDayModes = new Set(dayModeOptions.map((option) => option.value))
+
+/* -------------------------------------------------------------------------- */
+/* 桌面便笺                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export const desktopNoteColorOptions: Array<{
+  value: DesktopNoteColor
+  label: string
+}> = [
+  { value: 'yellow', label: '暖黄' },
+  { value: 'green', label: '薄荷绿' },
+  { value: 'blue', label: '雾蓝' },
+  { value: 'rose', label: '浅粉' },
+  { value: 'slate', label: '石墨灰' },
+]
+
+export const validDesktopNoteColors = new Set<DesktopNoteColor>(
+  desktopNoteColorOptions.map((option) => option.value),
+)
 
 /* -------------------------------------------------------------------------- */
 /* 快捷入口图标                                                                */

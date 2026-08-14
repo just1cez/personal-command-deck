@@ -44,6 +44,7 @@ const recognizableStateKeys = new Set([
   'projects',
   'quickLinks',
   'inbox',
+  'desktopNotes',
   'reminders',
   'review',
   'reviewSummary',

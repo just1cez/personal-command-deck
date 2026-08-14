@@ -55,6 +55,20 @@ export const TOP_TASK_LIMIT = 3
 export const TOP_TASK_TITLE_MAX_LENGTH = 60
 export const TODO_TITLE_MAX_LENGTH = 80
 
+/* -------------------------------------------------------------------------- */
+/* 桌面便笺                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export const DESKTOP_NOTE_CONTENT_MAX_LENGTH = 8_000
+export const DESKTOP_NOTE_LIMIT = 100
+export const DESKTOP_NOTE_OPEN_LIMIT = 6
+export const DESKTOP_NOTE_MIN_WIDTH = 240
+export const DESKTOP_NOTE_MIN_HEIGHT = 180
+export const DESKTOP_NOTE_MAX_WIDTH = 1_200
+export const DESKTOP_NOTE_MAX_HEIGHT = 1_000
+export const DESKTOP_NOTE_DEFAULT_WIDTH = 320
+export const DESKTOP_NOTE_DEFAULT_HEIGHT = 300
+
 /**
  * 完成度滑块的步进。
  * 刻意做粗：进度条只需要回答"大概推进到哪了"，精确到 1% 只会增加决策负担。

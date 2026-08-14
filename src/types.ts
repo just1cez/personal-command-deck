@@ -18,6 +18,7 @@ export type Theme = 'dark' | 'clean' | 'cyber' | 'paper'
 export type DayMode = '工作日' | '周末' | '冲刺' | '摸鱼恢复'
 export type TaskKind = 'top' | 'todo'
 export type AiProvider = 'openai' | 'deepseek' | 'moonshot' | 'custom'
+export type DesktopNoteColor = 'yellow' | 'green' | 'blue' | 'rose' | 'slate'
 
 /** 三个主视图：聚焦（开工）→ 推进（执行）→ 复盘（收工）。 */
 export type MainView = 'start' | 'execute' | 'review'
@@ -72,6 +73,25 @@ export type InboxItem = {
   id: string
   text: string
   createdAt: string
+}
+
+export type DesktopNoteBounds = {
+  x?: number
+  y?: number
+  width: number
+  height: number
+}
+
+/** 独立桌面窗口中的轻量便笺；内容仍由主窗口统一持久化。 */
+export type DesktopNote = {
+  id: string
+  content: string
+  color: DesktopNoteColor
+  createdAt: string
+  updatedAt: string
+  isOpen: boolean
+  alwaysOnTop: boolean
+  bounds: DesktopNoteBounds
 }
 
 export type Reminder = {
@@ -264,6 +284,7 @@ export type DashboardState = {
   projects: Project[]
   quickLinks: QuickLink[]
   inbox: InboxItem[]
+  desktopNotes: DesktopNote[]
   reminders: Reminder[]
   review: DailyReview
   reviewSummary: string

@@ -5,14 +5,17 @@
  * Shift+Enter 保留换行，方便记稍长一点的想法。
  */
 import { useState } from 'react'
-import { Brain, Inbox, Trash2 } from 'lucide-react'
+import { Brain, Inbox, StickyNote, Trash2 } from 'lucide-react'
 import { useInboxActions } from '../../actions/useCaptureActions'
+import { useDesktopNoteActions } from '../../actions/useDesktopNoteActions'
 import { PanelTitle } from '../../components/ui/PanelTitle'
+import { isDesktopRuntime } from '../../services/desktopBridge'
 import { useDashboardStore } from '../../state/deckContext'
 
 export function InboxPanel() {
   const { dashboard } = useDashboardStore()
   const { addInboxItem, removeInboxItem } = useInboxActions()
+  const { createFromInbox } = useDesktopNoteActions()
   const [draft, setDraft] = useState('')
 
   const submit = () => {
@@ -50,14 +53,24 @@ export function InboxPanel() {
         {dashboard.inbox.map((item) => (
           <li key={item.id}>
             <span>{item.text}</span>
-            <button
-              type="button"
-              className="icon-button danger"
-              title="删除灵感"
-              onClick={() => removeInboxItem(item.id)}
-            >
-              <Trash2 size={15} />
-            </button>
+            <div className="inbox-item-actions">
+              <button
+                type="button"
+                className="icon-button"
+                title="转为桌面便笺"
+                onClick={() => createFromInbox(item.id, isDesktopRuntime())}
+              >
+                <StickyNote size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button danger"
+                title="删除灵感"
+                onClick={() => removeInboxItem(item.id)}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
           </li>
         ))}
       </ul>

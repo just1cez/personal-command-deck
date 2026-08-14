@@ -17,6 +17,7 @@ import {
   computeTaskStats,
 } from '../domain/stats'
 import { debugLog, installDebugBridge } from '../debug'
+import { requestStorageFlush } from '../services/desktopBridge'
 import type { DashboardState } from '../types'
 import type { DashboardStore, UpdateDashboard } from './deckContext'
 import { loadDashboardState, saveDashboardState } from './storage'
@@ -62,6 +63,8 @@ export const useDashboardState = (): DashboardStore => {
   useEffect(() => {
     if (!saveDashboardState(dashboard)) {
       queueNotice(NOTICE.storageFailure)
+    } else {
+      requestStorageFlush()
     }
     document.documentElement.dataset.theme = dashboard.theme
     document.documentElement.dataset.mode = dashboard.dayMode

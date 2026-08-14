@@ -107,8 +107,9 @@ export const requestAiSummary = async (settings: AiSettings, prompt: string) => 
   }
 
   // 桌面版优先走主进程，Key 不出渲染进程。
-  if (canProxyAiSummary()) {
-    const response = await getDesktopBridge()!.generateAiSummary(request)
+  const proxySummary = getDesktopBridge()?.generateAiSummary
+  if (canProxyAiSummary() && proxySummary) {
+    const response = await proxySummary(request)
     return response.content.trim()
   }
 

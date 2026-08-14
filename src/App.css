@@ -2162,7 +2162,7 @@ button {
   border-radius: 8px;
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 30px;
+  grid-template-columns: 1fr auto;
   padding: 9px 8px 9px 11px;
 }
 
@@ -4116,4 +4116,149 @@ button {
   .reminder-card .icon-button {
     grid-column: 2;
   }
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* 桌面便笺                                                                    */
+/* -------------------------------------------------------------------------- */
+
+.inbox-item-actions,
+.desktop-note-card-actions,
+.desktop-note-card-colors {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.desktop-notes-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  max-height: 440px;
+  overflow: auto;
+  padding: 0;
+}
+
+.desktop-notes-empty {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.desktop-note-card {
+  --desktop-note-tint: #d8bd55;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--desktop-note-tint) 16%, transparent), transparent 68%),
+    var(--surface);
+  border: 1px solid color-mix(in srgb, var(--desktop-note-tint) 38%, var(--border));
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.desktop-note-card-green { --desktop-note-tint: #72b77a; }
+.desktop-note-card-blue { --desktop-note-tint: #68a8c3; }
+.desktop-note-card-rose { --desktop-note-tint: #cf8493; }
+.desktop-note-card-slate { --desktop-note-tint: #87919e; }
+
+.desktop-note-card-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.desktop-note-card-heading strong {
+  color: var(--heading);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-note-card-heading span {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.desktop-note-card textarea {
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  font-size: 13px;
+  min-height: 74px;
+  width: 100%;
+}
+
+.desktop-note-card-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.desktop-note-card-actions button,
+.desktop-note-card-color {
+  align-items: center;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+
+.desktop-note-card-actions button:hover,
+.desktop-note-card-actions button.is-active {
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  color: var(--accent);
+}
+
+.desktop-note-card-actions button.danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+}
+
+.desktop-note-card-color {
+  border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+  border-radius: 50%;
+  height: 15px;
+  width: 15px;
+}
+
+.note-color-yellow { background: #d8bd55; }
+.note-color-green { background: #72b77a; }
+.note-color-blue { background: #68a8c3; }
+.note-color-rose { background: #cf8493; }
+.note-color-slate { background: #87919e; }
+
+.desktop-note-card-color.is-selected {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--heading);
+}
+
+
+.execute-notice-toast {
+  bottom: 22px;
+  left: 50%;
+  max-width: min(520px, calc(100vw - 40px));
+  padding: 10px 14px;
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 40;
+  color: var(--heading);
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 8%);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
 }

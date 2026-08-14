@@ -81,6 +81,7 @@ export const defaultState: DashboardState = {
     { id: uid(), label: 'Calendar', url: 'https://calendar.google.com', icon: 'calendar' },
     { id: uid(), label: 'Docs', url: 'https://docs.google.com', icon: 'doc' },
   ],
+  desktopNotes: [],
   inbox: [
     {
       id: uid(),

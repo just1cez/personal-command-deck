@@ -10,13 +10,20 @@ const {
   nativeImage,
   session,
   shell,
+  screen,
 } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 
 const isDev = process.env.VITE_DEV_SERVER_URL
 const appIconPath = path.join(__dirname, 'assets', 'app.ico')
 const trayIconPath = path.join(__dirname, 'assets', 'tray.png')
+const rendererIndexUrl = pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html'))
+// Keep these desktop-note limits in sync with src/config/constants.ts.
+const DESKTOP_NOTE_CONTENT_MAX_LENGTH = 8_000
+const DESKTOP_NOTE_LIMIT = 100
+const DESKTOP_NOTE_OPEN_LIMIT = 6
 
 // Windows toast 通知需要 AppUserModelId 才能正常显示
 if (process.platform === 'win32') {
@@ -27,6 +34,10 @@ let mainWindow = null
 let tray = null
 let isQuitting = false
 let closeDialogOpen = false
+let storageFlushTimer = null
+const desktopNoteWindows = new Map()
+const desktopNoteSnapshots = new Map()
+const suppressedDesktopNoteCloses = new Set()
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
 const defaultSettings = {
@@ -203,10 +214,15 @@ function isSafeExternalUrl(url) {
 
 function isAppUrl(url) {
   if (!url) return false
-  if (!isDev) return url.startsWith('file://')
 
   try {
-    return new URL(url).origin === new URL(isDev).origin
+    const parsed = new URL(url)
+    if (isDev) return parsed.origin === new URL(isDev).origin
+    return (
+      parsed.protocol === 'file:' &&
+      parsed.host === rendererIndexUrl.host &&
+      parsed.pathname === rendererIndexUrl.pathname
+    )
   } catch {
     return false
   }
@@ -285,6 +301,223 @@ async function handleWindowClose(event) {
   }
 }
 
+function isMainRenderer(sender) {
+  return Boolean(mainWindow) && sender?.id === mainWindow.webContents.id
+}
+
+function desktopNoteIdFromSender(sender) {
+  for (const [noteId, noteWindow] of desktopNoteWindows) {
+    if (noteWindow.webContents.id === sender?.id) return noteId
+  }
+  return ''
+}
+
+function sanitizeDesktopNoteSnapshot(value) {
+  if (!value || typeof value !== 'object') return null
+  const id = String(value.id ?? '').trim().slice(0, 120)
+  if (!id) return null
+  const colors = new Set(['yellow', 'green', 'blue', 'rose', 'slate'])
+  const bounds = value.bounds && typeof value.bounds === 'object' ? value.bounds : {}
+  const finite = (candidate) => typeof candidate === 'number' && Number.isFinite(candidate)
+  const clamp = (candidate, minimum, maximum, fallback) =>
+    Math.min(maximum, Math.max(minimum, Math.round(finite(candidate) ? candidate : fallback)))
+  return {
+    id,
+    content: String(value.content ?? '').slice(0, DESKTOP_NOTE_CONTENT_MAX_LENGTH),
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt.slice(0, 40) : '',
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt.slice(0, 40) : '',
+    color: colors.has(value.color) ? value.color : 'yellow',
+    isOpen: value.isOpen === true,
+    alwaysOnTop: value.alwaysOnTop === true,
+    bounds: {
+      x: finite(bounds.x) ? Math.round(bounds.x) : undefined,
+      y: finite(bounds.y) ? Math.round(bounds.y) : undefined,
+      width: clamp(bounds.width, 240, 1_200, 320),
+      height: clamp(bounds.height, 180, 1_000, 300),
+    },
+  }
+}
+
+function clampDesktopNoteBounds(bounds, cascadeIndex = 0) {
+  const requested = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  }
+  const display = Number.isFinite(requested.x) && Number.isFinite(requested.y)
+    ? screen.getDisplayMatching(requested)
+    : screen.getPrimaryDisplay()
+  const workArea = display.workArea
+  const width = Math.min(requested.width, workArea.width)
+  const height = Math.min(requested.height, workArea.height)
+  const cascadeOffset = (cascadeIndex % 8) * 24
+  const fallbackX = Math.round(workArea.x + (workArea.width - width) / 2 + cascadeOffset)
+  const fallbackY = Math.round(workArea.y + (workArea.height - height) / 2 + cascadeOffset)
+  return {
+    x: Math.min(workArea.x + workArea.width - width, Math.max(workArea.x, requested.x ?? fallbackX)),
+    y: Math.min(workArea.y + workArea.height - height, Math.max(workArea.y, requested.y ?? fallbackY)),
+    width,
+    height,
+  }
+}
+
+function scheduleStorageFlush(targetSession = session.defaultSession) {
+  if (storageFlushTimer) return
+  storageFlushTimer = setTimeout(() => {
+    storageFlushTimer = null
+    targetSession.flushStorageData()
+  }, 2_000)
+}
+
+function sendDesktopNoteCommand(command) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('desktop-notes:command', command)
+}
+
+function sendDesktopNoteSnapshot(noteId) {
+  const noteWindow = desktopNoteWindows.get(noteId)
+  const note = desktopNoteSnapshots.get(noteId)
+  if (!noteWindow || noteWindow.isDestroyed() || !note) return
+  noteWindow.webContents.send('desktop-notes:snapshot', note)
+}
+
+function closeDesktopNoteWindow(noteId, suppressEvent = false) {
+  const noteWindow = desktopNoteWindows.get(noteId)
+  if (!noteWindow || noteWindow.isDestroyed()) return
+  if (suppressEvent) suppressedDesktopNoteCloses.add(noteId)
+  noteWindow.close()
+}
+
+function createDesktopNoteWindow(note) {
+  const existing = desktopNoteWindows.get(note.id)
+  if (existing && !existing.isDestroyed()) {
+    existing.setAlwaysOnTop(note.alwaysOnTop)
+    existing.setSkipTaskbar(true)
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    sendDesktopNoteSnapshot(note.id)
+    return existing
+  }
+
+  const bounds = clampDesktopNoteBounds(note.bounds, desktopNoteWindows.size)
+  const noteWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: 240,
+    minHeight: 180,
+    title: '桌面便笺',
+    frame: false,
+    resizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    alwaysOnTop: note.alwaysOnTop,
+    skipTaskbar: true,
+    backgroundColor: '#f1df91',
+    icon: appIconPath,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      partition: 'desktop-notes',
+      preload: path.join(__dirname, 'note-preload.cjs'),
+    },
+  })
+  desktopNoteWindows.set(note.id, noteWindow)
+  noteWindow.webContents.session.setPermissionRequestHandler(
+    (_webContents, _permission, callback) => callback(false),
+  )
+
+  if (
+    bounds.x !== note.bounds.x ||
+    bounds.y !== note.bounds.y ||
+    bounds.width !== note.bounds.width ||
+    bounds.height !== note.bounds.height
+  ) {
+    sendDesktopNoteCommand({ type: 'patch', id: note.id, patch: { bounds } })
+  }
+
+  let boundsTimer = null
+  const reportBounds = () => {
+    if (boundsTimer) clearTimeout(boundsTimer)
+    boundsTimer = setTimeout(() => {
+      if (isQuitting || noteWindow.isDestroyed()) return
+      sendDesktopNoteCommand({ type: 'patch', id: note.id, patch: { bounds: noteWindow.getBounds() } })
+    }, 250)
+  }
+
+  noteWindow.on('move', reportBounds)
+  noteWindow.on('resize', reportBounds)
+  noteWindow.on('close', () => {
+    if (boundsTimer) clearTimeout(boundsTimer)
+    if (isQuitting) return
+    // 用户拖动后立刻关闭时，防抖计时器可能还没落盘；关闭前强制提交最终位置。
+    sendDesktopNoteCommand({ type: 'patch', id: note.id, patch: { bounds: noteWindow.getBounds() } })
+    if (suppressedDesktopNoteCloses.delete(note.id)) return
+    sendDesktopNoteCommand({ type: 'closed', id: note.id })
+  })
+  noteWindow.on('closed', () => {
+    desktopNoteWindows.delete(note.id)
+  })
+  noteWindow.once('ready-to-show', () => {
+    noteWindow.show()
+    noteWindow.focus()
+    sendDesktopNoteSnapshot(note.id)
+  })
+  noteWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  noteWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+  })
+
+  if (isDev) {
+    const url = new URL(isDev)
+    url.searchParams.set('window', 'desktop-note')
+    url.searchParams.set('noteId', note.id)
+    noteWindow.loadURL(url.toString())
+  } else {
+    noteWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), {
+      query: { window: 'desktop-note', noteId: note.id },
+    })
+  }
+  return noteWindow
+}
+
+function syncDesktopNoteWindows(notes) {
+  const nextIds = new Set()
+  let openCount = 0
+  for (const rawNote of (Array.isArray(notes) ? notes : []).slice(0, DESKTOP_NOTE_LIMIT)) {
+    const note = sanitizeDesktopNoteSnapshot(rawNote)
+    if (!note) continue
+    nextIds.add(note.id)
+    desktopNoteSnapshots.set(note.id, note)
+
+    const noteWindow = desktopNoteWindows.get(note.id)
+    if (note.isOpen) openCount += 1
+    if (note.isOpen && openCount > DESKTOP_NOTE_OPEN_LIMIT) {
+      note.isOpen = false
+      sendDesktopNoteCommand({ type: 'patch', id: note.id, patch: { isOpen: false } })
+    }
+    if (note.isOpen) {
+      if (!noteWindow || noteWindow.isDestroyed()) createDesktopNoteWindow(note)
+      else {
+        noteWindow.setAlwaysOnTop(note.alwaysOnTop)
+        sendDesktopNoteSnapshot(note.id)
+      }
+    } else if (noteWindow && !noteWindow.isDestroyed()) {
+      closeDesktopNoteWindow(note.id, true)
+    }
+  }
+
+  for (const noteId of [...desktopNoteSnapshots.keys()]) {
+    if (nextIds.has(noteId)) continue
+    desktopNoteSnapshots.delete(noteId)
+    closeDesktopNoteWindow(noteId, true)
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1380,
@@ -299,6 +532,7 @@ function createWindow() {
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
@@ -334,7 +568,86 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('ai:summary', async (_event, request) => {
+ipcMain.on('storage:changed', (event) => {
+  if (!isMainRenderer(event.sender)) return
+  scheduleStorageFlush(event.sender.session)
+})
+
+ipcMain.handle('desktop-notes:sync', (event, notes) => {
+  if (!isMainRenderer(event.sender)) return { synced: false }
+  syncDesktopNoteWindows(notes)
+  // localStorage 由渲染进程写入；同步窗口后立刻要求 Chromium 刷盘，
+  // 降低进程异常退出时刚编辑的便笺丢失概率。
+  event.sender.session.flushStorageData()
+  return { synced: true }
+})
+
+ipcMain.handle('desktop-notes:show', (event, requestedId) => {
+  if (!isMainRenderer(event.sender)) return { shown: false }
+  const noteId = String(requestedId ?? '').trim()
+  const note = desktopNoteSnapshots.get(noteId)
+  if (!note) return { shown: false }
+  createDesktopNoteWindow({ ...note, isOpen: true })
+  return { shown: true }
+})
+
+ipcMain.handle('desktop-notes:get', (event, requestedId) => {
+  const senderId = desktopNoteIdFromSender(event.sender)
+  const noteId = String(requestedId ?? '').trim()
+  if (!senderId || senderId !== noteId) return null
+  return desktopNoteSnapshots.get(noteId) ?? null
+})
+
+ipcMain.handle('desktop-notes:patch', (event, requestedId, patch) => {
+  const senderId = desktopNoteIdFromSender(event.sender)
+  const noteId = String(requestedId ?? '').trim()
+  if (!senderId || senderId !== noteId || !patch || typeof patch !== 'object') {
+    return { accepted: false }
+  }
+
+  const safePatch = {}
+  if (typeof patch.content === 'string') safePatch.content = patch.content.slice(0, DESKTOP_NOTE_CONTENT_MAX_LENGTH)
+  if (['yellow', 'green', 'blue', 'rose', 'slate'].includes(patch.color)) {
+    safePatch.color = patch.color
+  }
+  if (typeof patch.alwaysOnTop === 'boolean') {
+    safePatch.alwaysOnTop = patch.alwaysOnTop
+    const noteWindow = desktopNoteWindows.get(noteId)
+    if (noteWindow && !noteWindow.isDestroyed()) noteWindow.setAlwaysOnTop(patch.alwaysOnTop)
+  }
+  if (Object.keys(safePatch).length === 0) return { accepted: false }
+  sendDesktopNoteCommand({ type: 'patch', id: noteId, patch: safePatch })
+  return { accepted: true }
+})
+
+ipcMain.on('desktop-notes:flush', (event, requestedId, content) => {
+  const senderId = desktopNoteIdFromSender(event.sender)
+  const noteId = String(requestedId ?? '').trim()
+  if (!senderId || senderId !== noteId || typeof content !== 'string') return
+  sendDesktopNoteCommand({
+    type: 'patch',
+    id: noteId,
+    patch: { content: content.slice(0, DESKTOP_NOTE_CONTENT_MAX_LENGTH) },
+  })
+})
+
+ipcMain.handle('desktop-notes:action', (event, requestedId, action) => {
+  const senderId = desktopNoteIdFromSender(event.sender)
+  const noteId = String(requestedId ?? '').trim()
+  if (!senderId || senderId !== noteId) return { accepted: false }
+  const allowed = new Set(['close', 'delete', 'add-today', 'add-tomorrow'])
+  if (!allowed.has(action)) return { accepted: false }
+
+  if (action === 'close') closeDesktopNoteWindow(noteId)
+  else {
+    sendDesktopNoteCommand({ type: action, id: noteId })
+    if (action === 'delete') closeDesktopNoteWindow(noteId, true)
+  }
+  return { accepted: true }
+})
+
+ipcMain.handle('ai:summary', async (event, request) => {
+  if (!isMainRenderer(event.sender)) throw new Error('不允许的调用来源')
   const apiKey = String(request?.apiKey ?? '').trim()
   const baseUrl = String(request?.baseUrl ?? '').trim()
   const model = String(request?.model ?? '').trim()
@@ -376,7 +689,8 @@ ipcMain.handle('ai:summary', async (_event, request) => {
   return { content }
 })
 
-ipcMain.handle('app:notify', (_event, request) => {
+ipcMain.handle('app:notify', (event, request) => {
+  if (!isMainRenderer(event.sender)) return { shown: false }
   if (!Notification.isSupported()) return { shown: false }
   const title =
     String(request?.title ?? '').trim().slice(0, 80) || 'Personal Command Deck'
@@ -387,7 +701,8 @@ ipcMain.handle('app:notify', (_event, request) => {
   return { shown: true }
 })
 
-ipcMain.handle('settings:get', async () => {
+ipcMain.handle('settings:get', async (event) => {
+  if (!isMainRenderer(event.sender)) throw new Error('不允许的调用来源')
   return {
     settings: readSettings(),
     shortcut: getShortcutStatus(),
@@ -396,7 +711,8 @@ ipcMain.handle('settings:get', async () => {
 
 // 录制新快捷键期间挂起已注册的全局热键，否则按下当前组合键会被系统级热键
 // 吞掉，键盘事件到不了渲染进程，录制器收不到输入
-ipcMain.handle('settings:set-shortcut-capture', (_event, active) => {
+ipcMain.handle('settings:set-shortcut-capture', (event, active) => {
+  if (!isMainRenderer(event.sender)) throw new Error('不允许的调用来源')
   if (active) {
     globalShortcut.unregisterAll()
     registeredShortcut = ''
@@ -405,7 +721,8 @@ ipcMain.handle('settings:set-shortcut-capture', (_event, active) => {
   return { shortcut: registerGlobalShortcut() }
 })
 
-ipcMain.handle('settings:update-global-shortcut', async (_event, request) => {
+ipcMain.handle('settings:update-global-shortcut', async (event, request) => {
+  if (!isMainRenderer(event.sender)) throw new Error('不允许的调用来源')
   const current = readSettings()
   const enabled =
     typeof request?.enabled === 'boolean'
@@ -478,5 +795,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  if (storageFlushTimer) {
+    clearTimeout(storageFlushTimer)
+    storageFlushTimer = null
+  }
+  session.defaultSession.flushStorageData()
   globalShortcut.unregisterAll()
 })
