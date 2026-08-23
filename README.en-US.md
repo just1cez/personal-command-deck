@@ -6,9 +6,9 @@ It is not a team dashboard, calendar replacement, or heavy productivity system. 
 
 ## What's New in v0.4.4
 
-- Added desktop notes: create one directly or convert an inbox item into a separate, autosaving window with colors, always-on-top mode, restored placement, and quick actions for today's or tomorrow's tasks.
-- Note windows stay out of taskbar thumbnail groups; closing a note with content hides it, while an empty note is removed automatically.
 - The Windows installer now lets you choose desktop and Start Menu shortcuts, plus launch at startup.
+- Fixed the UAC shield overlapping the Next button label on the install-mode page.
+- Removed an ignored CSP directive, corrected renderer-layer dependencies, and cleaned up unused assets and duplicate styles.
 
 ## What You See When You Open It
 
