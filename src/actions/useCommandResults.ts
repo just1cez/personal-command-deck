@@ -5,9 +5,9 @@
  * 想让新的东西可被搜索，只要在 rows 里再拼一段 map 即可。
  */
 import { useMemo } from 'react'
-import { useFocusActions } from '../actions/useFocusActions'
-import { useQuickLinkActions } from '../actions/useCaptureActions'
-import { useTaskActions } from '../actions/useTaskActions'
+import { useFocusActions } from './useFocusActions'
+import { useQuickLinkActions } from './useCaptureActions'
+import { useTaskActions } from './useTaskActions'
 import { useDashboardStore } from '../state/deckContext'
 
 export type CommandRow = {

@@ -6,7 +6,7 @@
  */
 import { useState } from 'react'
 import { Search, X } from 'lucide-react'
-import { useCommandResults } from '../hooks/useCommandResults'
+import { useCommandResults } from '../actions/useCommandResults'
 import { useWindowKeyDown } from '../hooks/useWindowKeyDown'
 import { useDeckUi } from '../state/deckContext'
 

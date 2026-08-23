@@ -4,6 +4,12 @@ Personal Command Deck is a local-first desktop app for people who want one calm 
 
 It is not a team dashboard, calendar replacement, or heavy productivity system. It is a personal execution desk: open it, see the next useful action, and get moving.
 
+## What's New in v0.4.4
+
+- Added desktop notes: create one directly or convert an inbox item into a separate, autosaving window with colors, always-on-top mode, restored placement, and quick actions for today's or tomorrow's tasks.
+- Note windows stay out of taskbar thumbnail groups; closing a note with content hides it, while an empty note is removed automatically.
+- The Windows installer now lets you choose desktop and Start Menu shortcuts, plus launch at startup.
+
 ## What You See When You Open It
 
 - Today's focus: pick the todo or project to focus on from a dropdown (or keep the auto suggestion), type a custom focus duration, plus the focus timer, start button, completion rate, focus minutes, and nearby reminders.

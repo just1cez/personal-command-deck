@@ -1,7 +1,7 @@
 {
   "name": "personal-command-deck",
   "private": true,
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "A lightweight local personal command dashboard.",
   "author": "syf14",
   "license": "MIT",
@@ -24,6 +24,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "!electron/assets/app.png",
       "package.json",
       "LICENSE",
       "!node_modules/**/*"
@@ -39,6 +40,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "include": "scripts/installer.nsh",
+      "installerLanguages": [
+        "en_US",
+        "zh_CN"
+      ],
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }

@@ -23,7 +23,7 @@ import { ProjectFocusDialog } from './overlays/ProjectFocusDialog'
 import { QuoteManagerDialog } from './overlays/QuoteManagerDialog'
 import { useClock } from './hooks/useClock'
 import { useFocusTimer } from './hooks/useFocusTimer'
-import { useDesktopNoteWindows } from './hooks/useDesktopNoteWindows'
+import { useDesktopNoteWindows } from './actions/useDesktopNoteWindows'
 import {
   useDailyCarryover,
   useDailyQuoteSync,

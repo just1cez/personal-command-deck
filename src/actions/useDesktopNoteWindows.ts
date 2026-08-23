@@ -3,9 +3,9 @@
  * 只有主窗口持有 DashboardState；便笺窗口通过 Electron IPC 提交动作。
  */
 import { useEffect } from 'react'
-import { useDesktopNoteActions } from '../actions/useDesktopNoteActions'
 import { getDesktopBridge } from '../services/desktopBridge'
 import { useDashboardStore } from '../state/deckContext'
+import { useDesktopNoteActions } from './useDesktopNoteActions'
 
 export const useDesktopNoteWindows = () => {
   const { dashboard } = useDashboardStore()

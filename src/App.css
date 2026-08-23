@@ -3081,9 +3081,6 @@ button {
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
   color: var(--muted);
-}
-
-.review-summary {
   display: grid;
   gap: 8px;
   padding: 11px 12px;
@@ -3466,6 +3463,8 @@ button {
   color: var(--heading);
   cursor: pointer;
   display: grid;
+  font-size: 18px;
+  font-weight: 900;
   gap: 3px;
   min-height: 58px;
   padding: 8px 4px;
@@ -3482,11 +3481,6 @@ button {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
   color: var(--accent);
   transform: translateY(-1px);
-}
-
-.focus-duration-presets button {
-  font-size: 18px;
-  font-weight: 900;
 }
 
 .focus-duration-presets small {
