@@ -3,10 +3,12 @@
  */
 import { Archive, Trash2 } from 'lucide-react'
 import { useReviewActions } from '../../actions/useReviewActions'
+import { FocusRecordDetails } from '../../components/FocusRecordDetails'
 import { RetentionControls } from '../../components/RetentionControls'
 import { ReviewSectionHeading } from '../../components/ui/PanelTitle'
 import { RECENT_ARCHIVE_LIMIT } from '../../config/constants'
 import { getRetentionLabel } from '../../domain/retention'
+import { formatFocusActualMinutes } from '../../domain/focusRecords'
 import { useDashboardStore } from '../../state/deckContext'
 import type { DailyArchive } from '../../types'
 
@@ -79,7 +81,7 @@ export function ArchiveHistory({
               >
                 <span>{archive.date}</span>
                 <strong>{archive.completedTasks.length} 完成</strong>
-                <small>{archive.totalFocusMinutes} 分钟</small>
+                <small>{formatFocusActualMinutes(archive.actualFocusSeconds)} 分钟</small>
               </button>
             ))}
           </div>
@@ -90,7 +92,8 @@ export function ArchiveHistory({
                 <div>
                   <span>{selectedArchive.date}</span>
                   <strong>
-                    {selectedArchive.completedTasks.length} 项完成 · {selectedArchive.totalFocusMinutes} 分钟专注
+                    {selectedArchive.completedTasks.length} 项完成 ·{' '}
+                    {formatFocusActualMinutes(selectedArchive.actualFocusSeconds)} 分钟专注
                   </strong>
                 </div>
                 <div className="archive-detail-actions">
@@ -118,6 +121,14 @@ export function ArchiveHistory({
 
               <div className="archive-detail-grid">
                 <div>
+                  <span>专注记录</span>
+                  <p>
+                    计划 {selectedArchive.plannedFocusMinutes} 分钟 · 实际{' '}
+                    {formatFocusActualMinutes(selectedArchive.actualFocusSeconds)} 分钟 ·{' '}
+                    {selectedArchive.focusRecords.length} 段
+                  </p>
+                </div>
+                <div>
                   <span>完成项</span>
                   <p>{joinTaskTitles(selectedArchive.completedTasks, '没有完成项')}</p>
                 </div>
@@ -130,6 +141,7 @@ export function ArchiveHistory({
                   <p>{joinTaskTitles(selectedArchive.tomorrowTasks, '没有布置')}</p>
                 </div>
               </div>
+              <FocusRecordDetails records={selectedArchive.focusRecords} />
               <pre>{selectedArchive.summary}</pre>
             </div>
           )}

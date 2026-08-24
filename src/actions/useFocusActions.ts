@@ -20,6 +20,7 @@ import {
 import { requestWebNotificationPermission } from '../services/notifications'
 import { useDashboardStore, useDeckUi } from '../state/deckContext'
 import type { Project } from '../types'
+import { uid } from '../utils'
 
 export const useFocusActions = () => {
   const { dashboard, stats, updateDashboard, queueNotice } = useDashboardStore()
@@ -68,13 +69,18 @@ export const useFocusActions = () => {
           ? current.focus.secondsLeft
           : current.focus.durationMinutes * 60
 
-        const { projects, tasks, notice } = settleFocusSegment(current, elapsedSeconds)
+        const { projects, tasks, focusRecords, notice } = settleFocusSegment(
+          current,
+          elapsedSeconds,
+          'switched',
+        )
         if (notice) queueNotice(notice)
 
         return {
           ...current,
           projects,
           tasks,
+          focusRecords,
           currentFocus: nextLabel,
           focus: {
             ...current.focus,
@@ -83,6 +89,10 @@ export const useFocusActions = () => {
             taskLabel: nextLabel,
             // 续跑时保留原来的关联待办，重新开始才用新传入的。
             taskId: resuming ? current.focus.taskId : taskId,
+            sessionId: resuming ? current.focus.sessionId || uid() : uid(),
+            plannedSeconds: resuming
+              ? current.focus.plannedSeconds ?? current.focus.durationMinutes * 60
+              : secondsLeft,
             secondsLeft,
             endsAt: createFocusEndTime(secondsLeft),
             startedAt: new Date().toISOString(),
@@ -101,24 +111,10 @@ export const useFocusActions = () => {
         ? getFocusSecondsLeft(current.focus.endsAt)
         : current.focus.secondsLeft
 
-      const { projects, tasks, notice } = settleFocusSegment(current, elapsedSeconds)
-      if (notice) queueNotice(notice)
-
-      return {
-        ...current,
-        projects,
-        tasks,
-        focus: pauseFocusSession(current.focus, secondsLeft),
-      }
-    }, '暂停专注')
-  }, [queueNotice, updateDashboard])
-
-  /** 重置：结算这一段后清空本轮目标，回到整轮待命。 */
-  const resetFocus = useCallback(() => {
-    updateDashboard((current) => {
-      const { projects, tasks, notice } = settleFocusSegment(
+      const { projects, tasks, focusRecords, sessionId, notice } = settleFocusSegment(
         current,
-        getElapsedFocusSeconds(current.focus),
+        elapsedSeconds,
+        'paused',
       )
       if (notice) queueNotice(notice)
 
@@ -126,6 +122,27 @@ export const useFocusActions = () => {
         ...current,
         projects,
         tasks,
+        focusRecords,
+        focus: pauseFocusSession({ ...current.focus, sessionId }, secondsLeft),
+      }
+    }, '暂停专注')
+  }, [queueNotice, updateDashboard])
+
+  /** 重置：结算这一段后清空本轮目标，回到整轮待命。 */
+  const resetFocus = useCallback(() => {
+    updateDashboard((current) => {
+      const { projects, tasks, focusRecords, notice } = settleFocusSegment(
+        current,
+        getElapsedFocusSeconds(current.focus),
+        'reset',
+      )
+      if (notice) queueNotice(notice)
+
+      return {
+        ...current,
+        projects,
+        tasks,
+        focusRecords,
         currentFocus: IDLE_FOCUS_LABEL,
         focus: resetFocusSession(current.focus),
       }
@@ -185,9 +202,10 @@ export const useFocusActions = () => {
       const project = current.projects.find((item) => item.id === projectFocusTarget.id)
       if (!project) return current
 
-      const { projects, tasks, notice } = settleFocusSegment(
+      const { projects, tasks, focusRecords, notice } = settleFocusSegment(
         current,
         getElapsedFocusSeconds(current.focus),
+        'switched',
       )
       if (notice) queueNotice(notice)
 
@@ -196,6 +214,7 @@ export const useFocusActions = () => {
         ...current,
         projects,
         tasks,
+        focusRecords,
         currentFocus: project.nextAction,
         focus: {
           ...current.focus,
@@ -204,6 +223,8 @@ export const useFocusActions = () => {
           projectId: project.id,
           taskLabel: project.nextAction,
           taskId: projectFocusDraft.taskId,
+          sessionId: uid(),
+          plannedSeconds: secondsLeft,
           secondsLeft,
           endsAt: createFocusEndTime(secondsLeft),
           startedAt: new Date().toISOString(),

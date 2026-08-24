@@ -9,6 +9,7 @@
  */
 import { useCallback } from 'react'
 import { NOTICE } from '../config/constants'
+import { getElapsedFocusSeconds, settleFocusSegment } from '../domain/focus'
 import { moveItemById, moveTaskWithinKind } from '../domain/ordering'
 import {
   carryTomorrowTasksIntoToday,
@@ -81,7 +82,38 @@ export const useTaskActions = () => {
   const removeTask = useCallback(
     (id: string) => {
       updateDashboard(
-        (current) => ({ ...current, tasks: current.tasks.filter((task) => task.id !== id) }),
+        (current) => {
+          if (current.focus.taskId !== id) {
+            return { ...current, tasks: current.tasks.filter((task) => task.id !== id) }
+          }
+          if (!current.focus.running) {
+            return {
+              ...current,
+              tasks: current.tasks.filter((task) => task.id !== id),
+              focus: { ...current.focus, taskId: '' },
+            }
+          }
+
+          const switchedAt = new Date().toISOString()
+          const settlement = settleFocusSegment(
+            current,
+            getElapsedFocusSeconds(current.focus),
+            'switched',
+            switchedAt,
+          )
+          return {
+            ...current,
+            tasks: settlement.tasks.filter((task) => task.id !== id),
+            projects: settlement.projects,
+            focusRecords: settlement.focusRecords,
+            focus: {
+              ...current.focus,
+              taskId: '',
+              sessionId: settlement.sessionId || current.focus.sessionId,
+              startedAt: switchedAt,
+            },
+          }
+        },
         '删除任务',
       )
     },

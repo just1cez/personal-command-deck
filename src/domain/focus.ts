@@ -13,10 +13,18 @@
 import {
   FOCUS_MINUTES_MAX,
   FOCUS_MINUTES_MIN,
+  FOCUS_RECORD_LIMIT,
   NOTICE,
 } from '../config/constants'
-import type { DashboardState, FocusSession, Project, Task } from '../types'
-import { clamp } from '../utils'
+import type {
+  DashboardState,
+  FocusEndReason,
+  FocusRecord,
+  FocusSession,
+  Project,
+  Task,
+} from '../types'
+import { clamp, formatLocalDate, uid } from '../utils'
 
 /* -------------------------------------------------------------------------- */
 /* 时间换算                                                                    */
@@ -45,20 +53,24 @@ export const getFocusSecondsLeft = (endsAt?: string) => {
  * 这一段已经专注了多少秒。
  * 用 `min(now, endsAt)` 封顶，避免"计时早已结束、页面很久之后才被唤醒"时多记时间。
  */
-export const getFocusSegmentSeconds = (startedAt?: string, endsAt?: string) => {
+export const getFocusSegmentSeconds = (
+  startedAt?: string,
+  endsAt?: string,
+  now = Date.now(),
+) => {
   if (!startedAt || !endsAt) return 0
   const startTime = new Date(startedAt).getTime()
   const endTime = new Date(endsAt).getTime()
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return 0
   return Math.max(
     0,
-    Math.floor((Math.min(Date.now(), endTime) - startTime) / 1000),
+    Math.floor((Math.min(now, endTime) - startTime) / 1000),
   )
 }
 
 /** 正在运行时这一段已过去的秒数；没在跑就是 0（没有可结算的时间）。 */
-export const getElapsedFocusSeconds = (focus: FocusSession) =>
-  focus.running ? getFocusSegmentSeconds(focus.startedAt, focus.endsAt) : 0
+export const getElapsedFocusSeconds = (focus: FocusSession, now = Date.now()) =>
+  focus.running ? getFocusSegmentSeconds(focus.startedAt, focus.endsAt, now) : 0
 
 /* -------------------------------------------------------------------------- */
 /* 会话状态判断                                                                */
@@ -116,13 +128,16 @@ export const addFocusSecondsToTask = (task: Task, seconds: number): Task => ({
 /** 结算提示文案：不足 1 分钟也要给反馈，否则用户会以为没记上。 */
 export const formatFocusRecordNotice = (projectName: string, seconds: number) =>
   seconds < 60
-    ? NOTICE.focusRecordedUnderOneMinute(projectName)
+    ? NOTICE.focusRecordedUnderOneMinute(projectName, seconds)
     : NOTICE.focusRecorded(projectName, secondsToDisplayMinutes(seconds))
 
 /** 一次结算的结果：新的项目列表、新的任务列表，以及要不要给用户提示。 */
 export type FocusSettlement = {
   projects: Project[]
   tasks: Task[]
+  focusRecords: FocusRecord[]
+  /** 兼容升级前正在运行但没有 sessionId 的会话。 */
+  sessionId: string
   /** 空字符串表示这次不需要提示（没有可结算的时间，或项目已被删除）。 */
   notice: string
 }
@@ -162,9 +177,63 @@ const settleTasks = (current: DashboardState, seconds: number): Task[] => {
 export const settleFocusSegment = (
   current: DashboardState,
   seconds: number,
+  endReason: FocusEndReason,
+  endedAt = new Date().toISOString(),
 ): FocusSettlement => {
+  if (seconds <= 0 || !current.focus.startedAt) {
+    return {
+      projects: current.projects,
+      tasks: current.tasks,
+      focusRecords: current.focusRecords,
+      sessionId: current.focus.sessionId ?? '',
+      notice: '',
+    }
+  }
+
+  const startedTime = new Date(current.focus.startedAt).getTime()
+  const requestedEndedTime = new Date(endedAt).getTime()
+  const focusEndedTime = new Date(current.focus.endsAt ?? endedAt).getTime()
+  const endedTime = Math.min(requestedEndedTime, focusEndedTime)
+  if (!Number.isFinite(startedTime) || !Number.isFinite(endedTime) || endedTime < startedTime) {
+    return {
+      projects: current.projects,
+      tasks: current.tasks,
+      focusRecords: current.focusRecords,
+      sessionId: current.focus.sessionId ?? '',
+      notice: '',
+    }
+  }
+
   const { projects, notice } = settleProjects(current, seconds)
-  return { projects, tasks: settleTasks(current, seconds), notice }
+  const targetProject = current.projects.find(
+    (project) => project.id === current.focus.projectId,
+  )
+  const targetTask = current.tasks.find((task) => task.id === current.focus.taskId)
+  const sessionId = current.focus.sessionId || uid()
+  const record: FocusRecord = {
+    id: uid(),
+    sessionId,
+    date: formatLocalDate(new Date(current.focus.startedAt)),
+    startedAt: current.focus.startedAt,
+    endedAt: new Date(endedTime).toISOString(),
+    plannedSeconds:
+      current.focus.plannedSeconds ?? current.focus.durationMinutes * 60,
+    actualSeconds: seconds,
+    targetLabel: current.focus.taskLabel || targetTask?.title || targetProject?.nextAction || '',
+    projectId: current.focus.projectId || undefined,
+    taskId: current.focus.taskId || undefined,
+    projectName: targetProject?.name ?? '',
+    taskTitle: targetTask?.title ?? '',
+    endReason,
+  }
+
+  return {
+    projects,
+    tasks: settleTasks(current, seconds),
+    focusRecords: [...current.focusRecords, record].slice(-FOCUS_RECORD_LIMIT),
+    sessionId,
+    notice,
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -178,6 +247,8 @@ export const resetFocusSession = (focus: FocusSession): FocusSession => ({
   secondsLeft: focus.durationMinutes * 60,
   taskLabel: '',
   taskId: '',
+  sessionId: undefined,
+  plannedSeconds: undefined,
   endsAt: undefined,
   startedAt: undefined,
 })
@@ -198,7 +269,10 @@ export const pauseFocusSession = (focus: FocusSession, secondsLeft: number): Foc
 export const detachFocusProject = (focus: FocusSession): FocusSession => ({
   ...focus,
   projectId: '',
+  taskId: '',
   running: false,
+  sessionId: undefined,
+  plannedSeconds: undefined,
   endsAt: undefined,
   startedAt: undefined,
 })
@@ -213,6 +287,9 @@ export const releaseFocusForCompletedProject = (focus: FocusSession): FocusSessi
   running: false,
   taskLabel: '',
   secondsLeft: focus.durationMinutes * 60,
+  taskId: '',
+  sessionId: undefined,
+  plannedSeconds: undefined,
   endsAt: undefined,
   startedAt: undefined,
 })

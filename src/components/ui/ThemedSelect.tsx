@@ -22,6 +22,7 @@ export function ThemedSelect({
   icon,
   className = '',
   compact = false,
+  disabled = false,
   'aria-label': ariaLabel,
 }: {
   value: string
@@ -31,6 +32,7 @@ export function ThemedSelect({
   icon?: React.ReactNode
   className?: string
   compact?: boolean
+  disabled?: boolean
   'aria-label'?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -93,6 +95,7 @@ export function ThemedSelect({
       className={[
         'themed-select',
         compact ? 'compact' : '',
+        disabled ? 'disabled' : '',
         open ? 'open' : '',
         open && menuPlacement === 'up' ? 'drop-up' : '',
         className,
@@ -113,7 +116,9 @@ export function ThemedSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel ?? label}
+        disabled={disabled}
         onClick={() => {
+          if (disabled) return
           // 每次打开都先假设向下，再由 layout effect 校正。
           setMenuPlacement('down')
           setOpen((current) => !current)

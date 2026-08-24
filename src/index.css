@@ -103,6 +103,7 @@ html {
     radial-gradient(circle at 84% 6%, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 28%),
     var(--bg);
   min-height: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {

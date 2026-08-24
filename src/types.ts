@@ -19,6 +19,13 @@ export type DayMode = '工作日' | '周末' | '冲刺' | '摸鱼恢复'
 export type TaskKind = 'top' | 'todo'
 export type AiProvider = 'openai' | 'deepseek' | 'moonshot' | 'custom'
 export type DesktopNoteColor = 'yellow' | 'green' | 'blue' | 'rose' | 'slate'
+export type FocusEndReason =
+  | 'paused'
+  | 'reset'
+  | 'switched'
+  | 'completed'
+  | 'appClosed'
+  | 'archived'
 
 /** 三个主视图：聚焦（开工）→ 推进（执行）→ 复盘（收工）。 */
 export type MainView = 'start' | 'execute' | 'review'
@@ -123,6 +130,9 @@ export type DailyArchive = {
   inbox: InboxItem[]
   review: DailyReview
   summary: string
+  focusRecords: FocusRecord[]
+  plannedFocusMinutes: number
+  actualFocusSeconds: number
   totalFocusMinutes: number
 }
 
@@ -209,8 +219,31 @@ export type FocusSession = {
   taskLabel: string
   /** 可选：把专注时长同时记到某条今日待办上。 */
   taskId?: string
+  /** 同一轮暂停再继续时保持不变，用于按轮汇总计划时长。 */
+  sessionId?: string
+  /** 本轮启动时的计划秒数；运行中修改下一轮时长不会改变它。 */
+  plannedSeconds?: number
   endsAt?: string
   startedAt?: string
+}
+
+/** 一段连续、已经结算的专注时间。 */
+export type FocusRecord = {
+  id: string
+  sessionId: string
+  /** 按 startedAt 计算的本地日历日。 */
+  date: string
+  startedAt: string
+  endedAt: string
+  plannedSeconds: number
+  actualSeconds: number
+  targetLabel: string
+  projectId?: string
+  taskId?: string
+  /** 名称快照，关联实体改名或删除后仍可读。 */
+  projectName: string
+  taskTitle: string
+  endReason: FocusEndReason
 }
 
 /* -------------------------------------------------------------------------- */
@@ -291,6 +324,8 @@ export type DashboardState = {
   ai: AiSettings
   retention: RetentionSettings
   archives: DailyArchive[]
+  /** 尚未写入每日归档的专注记录。 */
+  focusRecords: FocusRecord[]
   focus: FocusSession
 }
 
@@ -301,7 +336,7 @@ export type StoredDashboardState = Partial<DashboardState> & {
 
 export type DashboardBackup = {
   app: 'Personal Command Deck'
-  version: 1
+  version: 2
   exportedAt: string
   state: DashboardState
 }

@@ -18,6 +18,7 @@ import {
   FOCUS_MINUTES_MIN,
   FOCUS_MINUTES_TOTAL_MAX,
   FOCUS_SECONDS_MAX,
+  FOCUS_RECORD_LIMIT,
   DESKTOP_NOTE_CONTENT_MAX_LENGTH,
   DESKTOP_NOTE_LIMIT,
   DESKTOP_NOTE_OPEN_LIMIT,
@@ -47,6 +48,8 @@ import type {
   DesktopNote,
   DesktopNoteColor,
   InboxItem,
+  FocusEndReason,
+  FocusRecord,
   Project,
   QuickLink,
   Reminder,
@@ -54,7 +57,14 @@ import type {
   Task,
   Theme,
 } from '../types'
-import { clampProgress, dateAfter, normalizeHttpUrl, todayIso, uid } from '../utils'
+import {
+  clampProgress,
+  dateAfter,
+  formatLocalDate,
+  normalizeHttpUrl,
+  todayIso,
+  uid,
+} from '../utils'
 import { defaultState } from './defaults'
 import {
   booleanValue,
@@ -260,6 +270,65 @@ const normalizeReminders = (value: unknown): Reminder[] => {
   return reminders
 }
 
+const validFocusEndReasons = new Set<FocusEndReason>([
+  'paused',
+  'reset',
+  'switched',
+  'completed',
+  'appClosed',
+  'archived',
+])
+
+export const normalizeFocusRecords = (value: unknown): FocusRecord[] => {
+  if (!Array.isArray(value)) return []
+
+  const records = value
+    .map((item): FocusRecord | null => {
+      if (!isPlainObject(item)) return null
+      if (!isIsoDateTime(item.startedAt) || !isIsoDateTime(item.endedAt)) return null
+      const startedTime = new Date(item.startedAt).getTime()
+      const endedTime = new Date(item.endedAt).getTime()
+      if (endedTime < startedTime) return null
+
+      const actualSeconds = clampedNumber(item.actualSeconds, 0, FOCUS_SECONDS_MAX, 0)
+      if (actualSeconds <= 0) return null
+      const endReason = validFocusEndReasons.has(item.endReason as FocusEndReason)
+        ? (item.endReason as FocusEndReason)
+        : null
+      if (!endReason) return null
+
+      return {
+        id: trimmedText(item.id) || uid(),
+        sessionId: trimmedText(item.sessionId) || uid(),
+        date: formatLocalDate(new Date(item.startedAt)),
+        startedAt: item.startedAt,
+        endedAt: item.endedAt,
+        plannedSeconds: clampedNumber(
+          item.plannedSeconds,
+          FOCUS_MINUTES_MIN * 60,
+          FOCUS_MINUTES_MAX * 60,
+          defaultState.focus.durationMinutes * 60,
+        ),
+        actualSeconds,
+        targetLabel: trimmedText(item.targetLabel),
+        projectId: trimmedText(item.projectId) || undefined,
+        taskId: trimmedText(item.taskId) || undefined,
+        projectName: trimmedText(item.projectName),
+        taskTitle: trimmedText(item.taskTitle),
+        endReason,
+      } satisfies FocusRecord
+    })
+    .filter((record): record is FocusRecord => Boolean(record))
+    .sort(
+      (left, right) =>
+        new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
+    )
+
+  const byId = new Map<string, FocusRecord>()
+  records.forEach((record) => byId.set(record.id, record))
+  return [...byId.values()].slice(-FOCUS_RECORD_LIMIT)
+}
+
 const normalizeArchives = (value: unknown): DailyArchive[] => {
   if (!Array.isArray(value)) return defaultState.archives
 
@@ -267,6 +336,20 @@ const normalizeArchives = (value: unknown): DailyArchive[] => {
     .map((item) => {
       if (!isPlainObject(item)) return null
       const review = isPlainObject(item.review) ? item.review : {}
+
+      const focusRecords = normalizeFocusRecords(item.focusRecords)
+      const legacyTotalMinutes = clampedNumber(
+        item.totalFocusMinutes,
+        0,
+        FOCUS_MINUTES_TOTAL_MAX,
+        0,
+      )
+      const actualFocusSeconds = clampedNumber(
+        item.actualFocusSeconds,
+        0,
+        FOCUS_SECONDS_MAX,
+        legacyTotalMinutes * 60,
+      )
 
       return {
         id: trimmedText(item.id) || uid(),
@@ -283,7 +366,15 @@ const normalizeArchives = (value: unknown): DailyArchive[] => {
           tomorrow: textValue(review.tomorrow),
         },
         summary: textValue(item.summary),
-        totalFocusMinutes: clampedNumber(item.totalFocusMinutes, 0, FOCUS_MINUTES_TOTAL_MAX, 0),
+        focusRecords,
+        plannedFocusMinutes: clampedNumber(
+          item.plannedFocusMinutes,
+          0,
+          FOCUS_MINUTES_TOTAL_MAX,
+          0,
+        ),
+        actualFocusSeconds,
+        totalFocusMinutes: Math.floor(actualFocusSeconds / 60),
       }
     })
     .filter((archive): archive is DailyArchive => Boolean(archive))
@@ -364,7 +455,13 @@ export const normalizeDashboardState = (
     : textValue(parsed.ai?.apiKey)
 
   const tasks = normalizeTasks(parsed.tasks)
-  const restoredFocus = restoreFocusSession(parsed, retained.projects, tasks, now)
+  const restoredFocus = restoreFocusSession(
+    parsed,
+    retained.projects,
+    tasks,
+    normalizeFocusRecords(parsed.focusRecords),
+    now,
+  )
 
   return {
     quotePoolVersion: quotes.quotePoolVersion,
@@ -412,6 +509,7 @@ export const normalizeDashboardState = (
     },
     retention,
     archives: retained.archives,
+    focusRecords: restoredFocus.focusRecords,
     focus: restoredFocus.focus,
   }
 }
@@ -431,6 +529,7 @@ const restoreFocusSession = (
   parsed: StoredDashboardState,
   projects: Project[],
   tasks: Task[],
+  focusRecords: FocusRecord[],
   now: number,
 ) => {
   const durationMinutes = clampedNumber(
@@ -458,16 +557,55 @@ const restoreFocusSession = (
   )
 
   const shouldSettle = recovery.offlineSeconds > 0
+  const storedSecondsLeft = clampedNumber(
+    parsed.focus?.secondsLeft,
+    0,
+    durationMinutes * 60,
+    durationMinutes * 60,
+  )
+  const storedTaskLabel = textValue(parsed.focus?.taskLabel)
+  const hasPausedSession =
+    Boolean(projectId) &&
+    Boolean(storedTaskLabel) &&
+    storedSecondsLeft > 0 &&
+    storedSecondsLeft < durationMinutes * 60
+  const hasSession = recovery.wasRunning || hasPausedSession
+  const sessionId = hasSession ? textValue(parsed.focus?.sessionId) || uid() : ''
+  const plannedSeconds = clampedNumber(
+    parsed.focus?.plannedSeconds,
+    FOCUS_MINUTES_MIN * 60,
+    FOCUS_MINUTES_MAX * 60,
+    durationMinutes * 60,
+  )
+  const recoveredRecord: FocusRecord | null = shouldSettle
+    ? {
+        id: uid(),
+        sessionId,
+        date: formatLocalDate(new Date(textValue(parsed.focus?.startedAt))),
+        startedAt: textValue(parsed.focus?.startedAt),
+        endedAt: recovery.expired
+          ? textValue(parsed.focus?.endsAt)
+          : new Date(now).toISOString(),
+        plannedSeconds,
+        actualSeconds: recovery.offlineSeconds,
+        targetLabel: textValue(parsed.focus?.taskLabel),
+        projectId: projectId || undefined,
+        taskId: taskId || undefined,
+        projectName: projects.find((project) => project.id === projectId)?.name ?? '',
+        taskTitle: tasks.find((task) => task.id === taskId)?.title ?? '',
+        endReason: recovery.expired ? 'completed' : 'appClosed',
+      }
+    : null
   const focus: DashboardState['focus'] = {
     running: false,
     durationMinutes,
-    secondsLeft: recovery.wasRunning
-      ? recovery.secondsLeft
-      : clampedNumber(parsed.focus?.secondsLeft, 0, durationMinutes * 60, durationMinutes * 60),
+    secondsLeft: recovery.wasRunning ? recovery.secondsLeft : storedSecondsLeft,
     projectId,
     // 这一轮已经结束了，本轮目标和关联待办都该清掉。
-    taskLabel: recovery.expired ? '' : textValue(parsed.focus?.taskLabel),
+    taskLabel: recovery.expired ? '' : storedTaskLabel,
     taskId: recovery.expired ? '' : taskId,
+    sessionId: recovery.expired || !hasSession ? undefined : sessionId,
+    plannedSeconds: recovery.expired || !hasSession ? undefined : plannedSeconds,
     endsAt: undefined,
     startedAt: undefined,
   }
@@ -489,5 +627,8 @@ const restoreFocusSession = (
             task.id === taskId ? addFocusSecondsToTask(task, recovery.offlineSeconds) : task,
           )
         : tasks,
+    focusRecords: recoveredRecord
+      ? [...focusRecords, recoveredRecord].slice(-FOCUS_RECORD_LIMIT)
+      : focusRecords,
   }
 }

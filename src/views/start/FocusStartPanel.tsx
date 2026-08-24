@@ -27,6 +27,7 @@ import type { SelectOption } from '../../types'
 
 /** 自动推荐对应的下拉项值（空串）。 */
 const AUTO_CHOICE = ''
+const RUNNING_CHOICE = 'running'
 
 export function FocusStartPanel() {
   const { dashboard, stats, notice } = useDashboardStore()
@@ -65,6 +66,9 @@ export function FocusStartPanel() {
   const resumable = isPausedFocusSession(dashboard.focus)
 
   const focusChoiceOptions: SelectOption[] = [
+    ...(dashboard.focus.running
+      ? [{ value: RUNNING_CHOICE, label: '专注进行中', icon: <Focus size={15} /> }]
+      : []),
     { value: AUTO_CHOICE, label: '自动推荐', icon: <Sparkles size={15} /> },
     ...topTasks
       .filter((task) => !task.done)
@@ -112,17 +116,16 @@ export function FocusStartPanel() {
       <div className="focus-priority">
         <div className="focus-priority-head">
           <span>本轮目标</span>
-          {/* 正在跑的时候不给换目标，避免时间记错项目。 */}
-          {!dashboard.focus.running && (
-            <ThemedSelect
-              compact
-              className="focus-target-select"
-              aria-label="选择本轮专注目标"
-              value={focusChoice}
-              options={focusChoiceOptions}
-              onChange={setFocusChoice}
-            />
-          )}
+          {/* 运行中保留同尺寸的禁用控件，避免面板高度和页面滚动条发生跳变。 */}
+          <ThemedSelect
+            compact
+            disabled={dashboard.focus.running}
+            className="focus-target-select"
+            aria-label="选择本轮专注目标"
+            value={dashboard.focus.running ? RUNNING_CHOICE : focusChoice}
+            options={focusChoiceOptions}
+            onChange={setFocusChoice}
+          />
         </div>
         <strong>{visibleTarget.label}</strong>
         <small className="focus-source">{visibleTarget.source}</small>

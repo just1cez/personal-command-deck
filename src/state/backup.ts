@@ -51,6 +51,7 @@ const recognizableStateKeys = new Set([
   'ai',
   'retention',
   'archives',
+  'focusRecords',
   'focus',
 ])
 

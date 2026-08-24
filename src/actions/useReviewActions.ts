@@ -3,7 +3,7 @@
  */
 import { useCallback } from 'react'
 import { CONFIRM, NOTICE } from '../config/constants'
-import { buildArchive, upsertArchive } from '../domain/archive'
+import { archiveDashboardToday } from '../domain/archive'
 import { applyRetentionPolicy, clampRetentionDays } from '../domain/retention'
 import { useDashboardStore } from '../state/deckContext'
 import type { DailyReview, DashboardState } from '../types'
@@ -25,13 +25,7 @@ export const useReviewActions = () => {
   /** 归档今天；同一天重复归档会覆盖上一次的记录。 */
   const archiveToday = useCallback(() => {
     updateDashboard((current) => {
-      const archive = buildArchive(current)
-      return {
-        ...current,
-        archives: upsertArchive(current.archives, archive),
-        // 归档时如果是现算的本地总结，也回写到界面上，保持两边一致。
-        reviewSummary: archive.summary,
-      }
+      return archiveDashboardToday(current)
     }, '归档今天')
     showNotice(NOTICE.archived)
   }, [showNotice, updateDashboard])

@@ -4,11 +4,11 @@ Personal Command Deck is a local-first desktop app for people who want one calm 
 
 It is not a team dashboard, calendar replacement, or heavy productivity system. It is a personal execution desk: open it, see the next useful action, and get moving.
 
-## What's New in v0.4.4
+## What's New in v0.5.0
 
-- The Windows installer now lets you choose desktop and Start Menu shortcuts, plus launch at startup.
-- Fixed the UAC shield overlapping the Next button label on the install-mode page.
-- Removed an ignored CSP directive, corrected renderer-layer dependencies, and cleaned up unused assets and duplicate styles.
+- Each pause, reset, target switch, natural completion, or offline recovery now creates an independent focus segment.
+- Today's receipt now reports actual time, planned time, and segment count, with expandable focus details.
+- Daily archives preserve focus details; repeated archives merge new segments, and archiving never interrupts a running timer.
 
 ## What You See When You Open It
 
@@ -20,12 +20,13 @@ It is not a team dashboard, calendar replacement, or heavy productivity system. 
 - Inbox: a place to drop loose thoughts before organizing them.
 - Desktop notes: create a note or convert an inbox item into a separate window with autosave, colors, always-on-top mode, restored window placement, and actions for adding it to today's or tomorrow's tasks.
 - Reminders and countdowns: bills, deadlines, birthdays, interviews, trips, and other dates.
-- End-of-day review: today's receipt, what moved, what got stuck, tomorrow's first step, next-day tasks, and recent archives.
+- End-of-day review: today's receipt with focus details, what moved, what got stuck, tomorrow's first step, next-day tasks, and recent archives.
 
 ## Main Features
 
 - Local dashboard data, no account required.
-- Focus timer: choose this round's target (a todo or a project) from a dropdown and type a custom duration; elapsed time is recorded to the matching project when you pause, reset, finish naturally, or switch, and also to the linked todo when you pick one.
+- Focus timer: choose this round's target and duration; each settlement updates linked project/todo totals and stores an independent segment with target snapshots and an end reason.
+- Focus records are stored as continuous segments; resuming after a pause remains part of the same round, so planned time is counted only once.
 - Manual ordering for priority tasks and projects.
 - Draggable completion progress bars on today's todos and active projects, in 10% steps; dragging a todo to 100% marks it done and dragging back clears it.
 - Daily quote with a local quote pool.
@@ -104,6 +105,14 @@ Run locally:
 npm run dev
 ```
 
+Run automated tests, lint, and the renderer build:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
 Run the desktop app in development:
 
 ```bash
@@ -115,6 +124,8 @@ Build the Windows installer:
 ```bash
 npm run dist:desktop
 ```
+
+Desktop builds use the Electron distribution installed at `node_modules/electron/dist`. This avoids an occasional Windows `EPERM` while renaming a freshly extracted Electron directory. Run `npm install` first so the local Electron version matches `package-lock.json`.
 
 Generated build output goes to `dist/` and `release/`. These folders are intentionally ignored by Git.
 

@@ -114,6 +114,7 @@ export const defaultState: DashboardState = {
     completedProjectDays: 0,
   },
   archives: [],
+  focusRecords: [],
   focus: {
     running: false,
     secondsLeft: DEFAULT_FOCUS_MINUTES * 60,

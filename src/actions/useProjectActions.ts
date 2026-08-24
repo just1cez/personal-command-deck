@@ -10,10 +10,10 @@
 import { useCallback } from 'react'
 import { IDLE_FOCUS_LABEL } from '../config/constants'
 import {
-  addFocusSecondsToProject,
   detachFocusProject,
-  getFocusSegmentSeconds,
+  getElapsedFocusSeconds,
   releaseFocusForCompletedProject,
+  settleFocusSegment,
 } from '../domain/focus'
 import { moveProjectWithinActive } from '../domain/ordering'
 import { createProject } from '../domain/projects'
@@ -68,20 +68,31 @@ export const useProjectActions = () => {
 
   /**
    * 删除项目。
-   * 如果正在专注这个项目，这一段还没结算的时间会随项目一起消失——
-   * 项目都不在了，把时间记到别处反而更让人困惑。
+   * 如果正在专注这个项目，先保存这一段的项目/任务名称快照，再删除并停表。
    */
   const removeProject = useCallback(
     (id: string) => {
       updateDashboard(
-        (current) => ({
-          ...current,
-          projects: current.projects.filter((project) => project.id !== id),
-          focus:
-            current.focus.projectId === id
-              ? detachFocusProject(current.focus)
-              : current.focus,
-        }),
+        (current) => {
+          if (current.focus.projectId !== id) {
+            return {
+              ...current,
+              projects: current.projects.filter((project) => project.id !== id),
+            }
+          }
+          const settlement = settleFocusSegment(
+            current,
+            getElapsedFocusSeconds(current.focus),
+            'switched',
+          )
+          return {
+            ...current,
+            projects: settlement.projects.filter((project) => project.id !== id),
+            tasks: settlement.tasks,
+            focusRecords: settlement.focusRecords,
+            focus: detachFocusProject(current.focus),
+          }
+        },
         '删除项目',
       )
       closeProjectFocusDraftIfMatches(id)
@@ -98,22 +109,28 @@ export const useProjectActions = () => {
     (id: string) => {
       updateDashboard((current) => {
         const isFocusedProject = current.focus.projectId === id
-        const elapsedSeconds =
-          current.focus.running && isFocusedProject
-            ? getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt)
-            : 0
+        const settlement = isFocusedProject
+          ? settleFocusSegment(
+              current,
+              getElapsedFocusSeconds(current.focus),
+              'switched',
+            )
+          : null
+        const projects = settlement?.projects ?? current.projects
 
         return {
           ...current,
-          projects: current.projects.map((project) =>
+          projects: projects.map((project) =>
             project.id === id
               ? {
-                  ...addFocusSecondsToProject(project, elapsedSeconds),
+                  ...project,
                   active: false,
                   completedAt: new Date().toISOString(),
                 }
               : project,
           ),
+          tasks: settlement?.tasks ?? current.tasks,
+          focusRecords: settlement?.focusRecords ?? current.focusRecords,
           currentFocus: isFocusedProject ? IDLE_FOCUS_LABEL : current.currentFocus,
           focus: isFocusedProject
             ? releaseFocusForCompletedProject(current.focus)

@@ -29,7 +29,7 @@ export const MAIN_VIEW_STORAGE_KEY = 'personal-command-deck-main-view'
 export const BACKUP_APP_NAME = 'Personal Command Deck'
 
 /** 备份文件格式版本，格式升级时 +1 并在 `state/backup.ts` 里加迁移分支。 */
-export const BACKUP_VERSION = 1
+export const BACKUP_VERSION = 2
 
 /* -------------------------------------------------------------------------- */
 /* 名言池                                                                      */
@@ -101,6 +101,9 @@ export const FOCUS_SECONDS_MAX = 100_000 * 60
 
 /** 单个项目累计分钟数的上限。 */
 export const FOCUS_MINUTES_TOTAL_MAX = 100_000
+
+/** 尚未归档的专注明细上限，避免长期不归档时状态无限增长。 */
+export const FOCUS_RECORD_LIMIT = 1_000
 
 /** 没有正在进行的专注时，`currentFocus` 显示的占位文案。 */
 export const IDLE_FOCUS_LABEL = '等待下一次启动'
@@ -186,10 +189,10 @@ export const NOTICE = {
   invalidLink: '链接无效：只支持 http/https 地址',
 
   focusRecorded: (projectName: string, minutes: number) =>
-    `已记录 ${minutes} 分钟到 ${projectName}`,
-  focusRecordedUnderOneMinute: (projectName: string) =>
-    `已记录不到 1 分钟到 ${projectName}`,
-  focusRecordHint: '专注暂停、重置或自然结束时，会把已过去的分钟记录到当前项目。',
+    `已记录 ${minutes} 分钟，计入「${projectName}」`,
+  focusRecordedUnderOneMinute: (projectName: string, seconds: number) =>
+    `已记录 ${seconds} 秒，计入「${projectName}」`,
+  focusRecordHint: '专注暂停、重置、切换或结束时，会保存本段实际用时。',
 
   tomorrowTasksCarried: (count: number) => `已把 ${count} 项明日任务带入今日任务`,
   tomorrowTasksPromoted: '已把明日任务带入今日任务',

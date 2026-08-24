@@ -1,7 +1,7 @@
 {
   "name": "personal-command-deck",
   "private": true,
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "A lightweight local personal command dashboard.",
   "author": "syf14",
   "license": "MIT",
@@ -13,8 +13,9 @@
     "build": "tsc -b && vite build",
     "clean:release": "node scripts/clean-release.mjs",
     "prune:release": "node scripts/prune-release.mjs",
-    "build:desktop": "npm run clean:release && npm run build && electron-builder --dir",
-    "dist:desktop": "npm run clean:release && npm run build && electron-builder && npm run prune:release",
+    "build:desktop": "npm run clean:release && npm run build && electron-builder --dir --config.electronDist=node_modules/electron/dist",
+    "dist:desktop": "npm run clean:release && npm run build && electron-builder --config.electronDist=node_modules/electron/dist && npm run prune:release",
+    "test": "vitest run",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -70,6 +71,7 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
+    "vitest": "^3.2.4",
     "wait-on": "^9.0.10"
   },
   "engines": {

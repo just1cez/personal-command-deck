@@ -44,7 +44,12 @@ export const useFocusTimer = () => {
           1,
           getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt),
         )
-        const { projects, tasks, notice } = settleFocusSegment(current, elapsedSeconds)
+        const { projects, tasks, focusRecords, notice } = settleFocusSegment(
+          current,
+          elapsedSeconds,
+          'completed',
+          current.focus.endsAt ?? new Date().toISOString(),
+        )
         if (notice) queueNotice(notice)
 
         // 用户很可能已经切到别的窗口了，界面里的提示看不见，补一条系统通知。
@@ -56,6 +61,7 @@ export const useFocusTimer = () => {
           ...current,
           projects,
           tasks,
+          focusRecords,
           currentFocus: IDLE_FOCUS_LABEL,
           focus: resetFocusSession(current.focus),
         }
