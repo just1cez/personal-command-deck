@@ -8,17 +8,29 @@
 import { BACKUP_APP_NAME, BACKUP_VERSION } from '../config/constants'
 import type { DashboardBackup, DashboardState, StoredDashboardState } from '../types'
 import { isPlainObject } from './parsers'
+import { getElapsedFocusSeconds, getFocusSecondsLeft, pauseFocusSession, settleFocusSegment } from '../domain/focus'
 
 /**
  * 备份专用的状态快照：
  * - 清空 API Key；
  * - 把专注计时停下（endsAt/startedAt 换台机器后没有意义）。
  */
-export const createBackupState = (dashboard: DashboardState): DashboardState => ({
-  ...dashboard,
-  focus: { ...dashboard.focus, running: false, endsAt: undefined, startedAt: undefined },
-  ai: { ...dashboard.ai, apiKey: '' },
-})
+export const createBackupState = (dashboard: DashboardState): DashboardState => {
+  const settlement = dashboard.focus.running
+    ? settleFocusSegment(dashboard, getElapsedFocusSeconds(dashboard.focus), 'paused')
+    : null
+  return {
+    ...dashboard,
+    projects: settlement?.projects ?? dashboard.projects,
+    tasks: settlement?.tasks ?? dashboard.tasks,
+    focusRecords: settlement?.focusRecords ?? dashboard.focusRecords,
+    focus: pauseFocusSession(
+      { ...dashboard.focus, sessionId: settlement?.sessionId || dashboard.focus.sessionId },
+      dashboard.focus.running ? getFocusSecondsLeft(dashboard.focus.endsAt) : dashboard.focus.secondsLeft,
+    ),
+    ai: { ...dashboard.ai, apiKey: '' },
+  }
+}
 
 /** 组装导出的 JSON 结构。 */
 export const buildBackupFile = (dashboard: DashboardState): DashboardBackup => ({
@@ -69,6 +81,9 @@ export const extractBackupState = (parsed: unknown): StoredDashboardState => {
   if ('state' in parsed) {
     if (parsed.app !== BACKUP_APP_NAME) {
       throw new Error('这不是 Personal Command Deck 的备份')
+    }
+    if (parsed.version !== 1 && parsed.version !== BACKUP_VERSION) {
+      throw new Error('不支持此备份版本，请使用兼容版本的应用导入')
     }
     if (!isPlainObject(parsed.state)) {
       throw new Error('备份里没有可导入的数据')

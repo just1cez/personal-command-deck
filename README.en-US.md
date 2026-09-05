@@ -4,6 +4,14 @@ Personal Command Deck is a local-first desktop app for people who want one calm 
 
 It is not a team dashboard, calendar replacement, or heavy productivity system. It is a personal execution desk: open it, see the next useful action, and get moving.
 
+## What's New in v0.5.1
+
+- Corrupt local data is preserved and recovered from the latest valid snapshot when possible; recovery snapshots never store API keys.
+- Exporting during a running focus session now checkpoints elapsed time, while unsupported future backup versions are rejected safely.
+- The countdown now updates locally instead of serializing and writing the entire dashboard every second.
+- Main-view switches preserve unsubmitted drafts; dialogs trap keyboard focus and restore it when closed.
+- AI reviews use today's focus records, support cancellation and a 30-second timeout, and never let stale requests overwrite newer edits.
+
 ## What's New in v0.5.0
 
 - Each pause, reset, target switch, natural completion, or offline recovery now creates an independent focus segment.

@@ -10,6 +10,7 @@ import { useQuoteActions } from '../actions/useQuoteActions'
 import { QUOTE_AUTHOR_MAX_LENGTH, QUOTE_TEXT_MAX_LENGTH } from '../config/constants'
 import { useDashboardStore, useDeckUi } from '../state/deckContext'
 import { fallbackQuote, getQuoteById } from '../state/quotes'
+import { Dialog } from '../components/ui/Dialog'
 
 export function QuoteManagerDialog() {
   const { dashboard } = useDashboardStore()
@@ -33,12 +34,7 @@ export function QuoteManagerDialog() {
   }
 
   return (
-    <div
-      className="command-overlay"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={() => setQuoteManagerOpen(false)}
-    >
+    <Dialog label="名言池" onClose={() => setQuoteManagerOpen(false)}>
       <div className="quote-panel" onMouseDown={(event) => event.stopPropagation()}>
         <div className="quote-manager-header">
           <div>
@@ -141,6 +137,6 @@ export function QuoteManagerDialog() {
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

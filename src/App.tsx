@@ -15,6 +15,7 @@
  * 想加一个新面板，只需要写一个组件并挂到对应的 view 里；
  * 想加一种新数据，从 types.ts + state/normalize.ts 开始。
  */
+import { Activity } from 'react'
 import { ControlStrip } from './layout/ControlStrip'
 import { MainViewTabs } from './layout/MainViewTabs'
 import { TopStatusBar } from './layout/TopStatusBar'
@@ -47,28 +48,30 @@ function ExecuteNoticeToast() {
   )
 }
 
+function ClockAndCarryover() {
+  const now = useClock()
+  useDailyCarryover(formatLocalDate(now))
+  return <TopStatusBar now={now} />
+}
+
 function AppShell() {
   const { activeMainView } = useDeckUi()
-
-  // 每秒一次的时钟，同时驱动顶栏显示和跨天检查。
-  const now = useClock()
 
   useFocusTimer()
   useDesktopNoteWindows()
   useDailyQuoteSync()
-  useDailyCarryover(formatLocalDate(now))
   useRetentionSweep()
 
   return (
     <main className="app-shell">
-      <TopStatusBar now={now} />
+      <ClockAndCarryover />
       <ControlStrip />
       <MainViewTabs />
 
-      {/* 三个主视图互斥显示；未激活的视图整体卸载，其内部草稿状态也随之清空。 */}
-      {activeMainView === 'start' && <StartView />}
-      {activeMainView === 'execute' && <ExecuteView />}
-      {activeMainView === 'review' && <ReviewView />}
+      {/* 隐藏视图暂停 effect，但保留未提交草稿与展开状态。 */}
+      <Activity mode={activeMainView === 'start' ? 'visible' : 'hidden'}><StartView /></Activity>
+      <Activity mode={activeMainView === 'execute' ? 'visible' : 'hidden'}><ExecuteView /></Activity>
+      <Activity mode={activeMainView === 'review' ? 'visible' : 'hidden'}><ReviewView /></Activity>
       {activeMainView === 'execute' && <ExecuteNoticeToast />}
 
       {/* 浮层统一挂在最外层：触发点可能在任意视图，渲染位置必须固定。 */}

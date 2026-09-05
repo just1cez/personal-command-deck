@@ -16,7 +16,9 @@ describe('focus-record backup compatibility', () => {
     expect(backup.state.ai.apiKey).toBe('')
     expect(backup.state.focus.running).toBe(false)
     expect(backup.state.focus.startedAt).toBeUndefined()
-    expect(backup.state.focusRecords).toEqual([])
+    expect(backup.state.focusRecords).toHaveLength(1)
+    expect(backup.state.focusRecords[0].actualSeconds).toBe(1500)
+    expect(state.focusRecords).toEqual([])
   })
 
   it('continues accepting a v1 backup envelope', () => {

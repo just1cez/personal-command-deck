@@ -134,6 +134,7 @@ export function FocusStartPanel() {
       <FocusControls
         running={dashboard.focus.running}
         secondsLeft={dashboard.focus.secondsLeft}
+        endsAt={dashboard.focus.endsAt}
         durationMinutes={dashboard.focus.durationMinutes}
         focusLabel={visibleTarget.label}
         onDurationChange={setFocusDuration}

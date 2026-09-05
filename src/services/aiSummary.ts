@@ -10,6 +10,7 @@
 import type { AiSettings, AiSummaryRequest, DashboardState } from '../types'
 import { daysUntil, todayIso } from '../utils'
 import { sortRemindersByDate } from '../domain/reminders'
+import { selectDailyFocus } from '../domain/focusRecords'
 import { canProxyAiSummary, getDesktopBridge } from './desktopBridge'
 
 /** 把一组条目排成 markdown 列表；空列表用一句兜底说明代替，避免提示词里出现空段落。 */
@@ -25,6 +26,7 @@ const listLines = (items: string[], fallback: string) =>
  * - 所有事实都来自本地数据，不含 API Key 等敏感信息。
  */
 export const buildReviewPrompt = (dashboard: DashboardState) => {
+  const dailyFocus = selectDailyFocus(dashboard, todayIso())
   const describeTask = (task: { kind: string; title: string }) =>
     `${task.kind === 'top' ? 'Top 3' : '待办'}：${task.title}`
 
@@ -56,7 +58,7 @@ export const buildReviewPrompt = (dashboard: DashboardState) => {
     `今日模式：${dashboard.dayMode}`,
     `能量：${dashboard.energy}/5`,
     `当前专注：${dashboard.currentFocus || '未记录'}`,
-    `专注累计：${dashboard.projects.reduce((total, project) => total + project.minutes, 0)} 分钟`,
+    `今日专注：${dailyFocus.actualMinutes} 分钟（${dailyFocus.actualSeconds} 秒），计划 ${dailyFocus.plannedMinutes} 分钟，共 ${dailyFocus.segmentCount} 段`,
     '',
     '复盘输入：',
     `- 今天做了什么：${dashboard.review.did.trim() || '未填写'}`,
@@ -95,7 +97,7 @@ export const getAiSettingsIssue = (settings: AiSettings) => {
 }
 
 /** 调用 AI 生成总结；配置不全或接口报错都会抛出带可读文案的 Error。 */
-export const requestAiSummary = async (settings: AiSettings, prompt: string) => {
+export const requestAiSummary = async (settings: AiSettings, prompt: string, signal?: AbortSignal) => {
   const issue = getAiSettingsIssue(settings)
   if (issue) throw new Error(issue)
 
@@ -115,6 +117,7 @@ export const requestAiSummary = async (settings: AiSettings, prompt: string) => 
 
   const endpoint = `${request.baseUrl.replace(/\/+$/, '')}/chat/completions`
   const response = await fetch(endpoint, {
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
     method: 'POST',
     headers: {
       Authorization: `Bearer ${request.apiKey}`,

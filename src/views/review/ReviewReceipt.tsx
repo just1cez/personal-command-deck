@@ -8,10 +8,8 @@ import { FocusRecordDetails } from '../../components/FocusRecordDetails'
 import { ReviewSectionHeading } from '../../components/ui/PanelTitle'
 import { TOP_TASK_LIMIT } from '../../config/constants'
 import {
-  computeFocusRecordStats,
   formatFocusActualMinutes,
-  mergeFocusRecords,
-  selectFocusRecordsForDate,
+  selectDailyFocus,
 } from '../../domain/focusRecords'
 import { useDashboardStore } from '../../state/deckContext'
 import { todayIso } from '../../utils'
@@ -19,24 +17,8 @@ import { todayIso } from '../../utils'
 export function ReviewReceipt({ archivedToday }: { archivedToday: boolean }) {
   const { dashboard, stats } = useDashboardStore()
   const today = todayIso()
-  const archived = dashboard.archives.find((archive) => archive.date === today)
-  const archivedRecords = archived?.focusRecords ?? []
-  const pendingRecords = selectFocusRecordsForDate(dashboard.focusRecords, today)
-  const focusRecords = mergeFocusRecords(archivedRecords, pendingRecords)
-  const archivedRecordStats = computeFocusRecordStats(archivedRecords)
-  const focusStats = computeFocusRecordStats(focusRecords)
-  const legacyActualSeconds = Math.max(
-    0,
-    (archived?.actualFocusSeconds ?? 0) - archivedRecordStats.actualSeconds,
-  )
-  const legacyPlannedSeconds = Math.max(
-    0,
-    (archived?.plannedFocusMinutes ?? 0) * 60 - archivedRecordStats.plannedSeconds,
-  )
-  const actualSeconds = legacyActualSeconds + focusStats.actualSeconds
-  const plannedMinutes = Math.floor(
-    (legacyPlannedSeconds + focusStats.plannedSeconds) / 60,
-  )
+  const focusStats = selectDailyFocus(dashboard, today)
+  const { records: focusRecords, actualSeconds, plannedMinutes } = focusStats
 
   const items = [
     {

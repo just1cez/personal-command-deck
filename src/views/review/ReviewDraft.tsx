@@ -35,6 +35,7 @@ export function ReviewDraft() {
             <Sparkles size={15} />
             {ai.loading ? '生成中...' : '生成复盘草稿'}
           </button>
+          {ai.loading && <button type="button" onClick={ai.cancelGeneration}>取消生成</button>}
         </div>
       </ReviewSectionHeading>
 

@@ -4,7 +4,7 @@
  * loading、error、设置面板开关都是**只有复盘草稿这一块用得到**的界面状态，
  * 所以留在这个 hook 里，不进全局 context。
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ERROR_TEXT, NOTICE } from '../config/constants'
 import { aiProviderDefaults } from '../config/options'
 import { buildLocalSummary } from '../domain/summary'
@@ -22,6 +22,16 @@ export const useAiSummary = () => {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const pendingRequest = useRef<AbortController | null>(null)
+  const latestDashboard = useRef(dashboard)
+  useEffect(() => { latestDashboard.current = dashboard }, [dashboard])
+  useEffect(() => () => { pendingRequest.current?.abort() }, [])
+
+  const cancelGeneration = useCallback(() => {
+    pendingRequest.current?.abort()
+    pendingRequest.current = null
+    setLoading(false)
+  }, [])
 
   /** 配置缺什么；空串表示配置完整。 */
   const settingsIssue = getAiSettingsIssue(dashboard.ai)
@@ -66,6 +76,7 @@ export const useAiSummary = () => {
    * 没启用 AI 就走本地规则，立刻出结果；启用了但配置不全则展开设置面板并提示。
    */
   const generateSummary = useCallback(async () => {
+    pendingRequest.current?.abort()
     if (!dashboard.ai.enabled) {
       updateDashboard(
         (current) => ({
@@ -92,18 +103,30 @@ export const useAiSummary = () => {
       return
     }
 
+    const controller = new AbortController()
+    pendingRequest.current = controller
+    const prompt = buildReviewPrompt(dashboard)
+    const originalSummary = dashboard.reviewSummary
     setLoading(true)
     setError('')
     try {
-      const summary = await requestAiSummary(dashboard.ai, buildReviewPrompt(dashboard))
+      const summary = await requestAiSummary(dashboard.ai, prompt, controller.signal)
+      if (controller.signal.aborted) return
+      const latest = latestDashboard.current
+      // 请求期间修改了输入、配置或总结时，旧结果不得覆盖新内容。
+      if (latest.ai !== dashboard.ai || latest.reviewSummary !== originalSummary || buildReviewPrompt(latest) !== prompt) return
       updateDashboard((current) => ({ ...current, reviewSummary: summary }), '生成 AI 总结')
       showNotice(NOTICE.aiSummaryReady)
     } catch (requestError) {
+      if (controller.signal.aborted) return
       setError(
         requestError instanceof Error ? requestError.message : ERROR_TEXT.aiSummaryFailed,
       )
     } finally {
-      setLoading(false)
+      if (pendingRequest.current === controller) {
+        pendingRequest.current = null
+        setLoading(false)
+      }
     }
   }, [dashboard, showNotice, updateDashboard])
 
@@ -117,5 +140,6 @@ export const useAiSummary = () => {
     updateSettings,
     setProvider,
     generateSummary,
+    cancelGeneration,
   }
 }

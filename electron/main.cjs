@@ -660,6 +660,7 @@ ipcMain.handle('ai:summary', async (event, request) => {
 
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
   const response = await fetch(endpoint, {
+    signal: AbortSignal.timeout(30_000),
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,

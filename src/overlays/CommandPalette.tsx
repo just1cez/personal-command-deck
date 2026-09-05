@@ -9,6 +9,7 @@ import { Search, X } from 'lucide-react'
 import { useCommandResults } from '../actions/useCommandResults'
 import { useWindowKeyDown } from '../hooks/useWindowKeyDown'
 import { useDeckUi } from '../state/deckContext'
+import { Dialog } from '../components/ui/Dialog'
 
 export function CommandPalette() {
   const { commandPaletteOpen, setCommandPaletteOpen } = useDeckUi()
@@ -29,18 +30,13 @@ export function CommandPalette() {
   if (!commandPaletteOpen) return null
 
   return (
-    <div
-      className="command-overlay"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={() => setCommandPaletteOpen(false)}
-    >
+    <Dialog label="命令面板" onClose={() => setCommandPaletteOpen(false)}>
       {/* 阻止冒泡，避免点击面板本身被当成"点了遮罩"。 */}
       <div className="command-panel" onMouseDown={(event) => event.stopPropagation()}>
         <div className="command-search">
           <Search size={19} />
           <input
-            autoFocus
+            data-dialog-autofocus
             aria-label="搜索命令"
             autoCapitalize="none"
             autoCorrect="off"
@@ -79,6 +75,6 @@ export function CommandPalette() {
           {!results.length && <p>没有找到匹配项</p>}
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

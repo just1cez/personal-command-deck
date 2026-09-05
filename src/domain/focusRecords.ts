@@ -1,4 +1,4 @@
-import type { FocusRecord } from '../types'
+import type { DashboardState, FocusRecord } from '../types'
 
 export type FocusRecordStats = {
   actualSeconds: number
@@ -39,6 +39,18 @@ export const computeFocusRecordStats = (records: FocusRecord[]): FocusRecordStat
     plannedMinutes: Math.floor(plannedSeconds / 60),
     segmentCount: records.length,
   }
+}
+
+/** 收据与 AI 使用同一份当天口径，并保留老归档没有明细的累计基数。 */
+export const selectDailyFocus = (dashboard: DashboardState, date: string) => {
+  const archived = dashboard.archives.find(archive => archive.date === date)
+  const archivedRecords = archived?.focusRecords ?? []
+  const records = mergeFocusRecords(archivedRecords, selectFocusRecordsForDate(dashboard.focusRecords, date))
+  const archivedStats = computeFocusRecordStats(archivedRecords)
+  const stats = computeFocusRecordStats(records)
+  const actualSeconds = stats.actualSeconds + Math.max(0, (archived?.actualFocusSeconds ?? 0) - archivedStats.actualSeconds)
+  const plannedSeconds = stats.plannedSeconds + Math.max(0, (archived?.plannedFocusMinutes ?? 0) * 60 - archivedStats.plannedSeconds)
+  return { records, ...stats, actualSeconds, actualMinutes: Math.floor(actualSeconds / 60), plannedSeconds, plannedMinutes: Math.floor(plannedSeconds / 60) }
 }
 
 export const focusEndReasonLabels = {

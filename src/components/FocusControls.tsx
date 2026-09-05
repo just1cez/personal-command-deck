@@ -5,19 +5,32 @@
  * 否则删到空串会被立刻纠正成最小值，用户根本没法改数字。
  * 失焦或回车时才提交并夹到合法区间。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Minus, Pause, Play, Plus, RotateCcw, TimerReset } from 'lucide-react'
 import {
   FOCUS_MINUTES_MAX,
   FOCUS_MINUTES_MIN,
   FOCUS_MINUTES_STEP,
 } from '../config/constants'
-import { clampFocusMinutes } from '../domain/focus'
+import { clampFocusMinutes, getFocusSecondsLeft } from '../domain/focus'
 import { formatMinutes } from '../utils'
+
+function Countdown({ running, endsAt, secondsLeft }: { running: boolean; endsAt?: string; secondsLeft: number }) {
+  const [remaining, setRemaining] = useState(() => running ? getFocusSecondsLeft(endsAt) : secondsLeft)
+  useEffect(() => {
+    if (!running) return
+    const sync = () => setRemaining(getFocusSecondsLeft(endsAt))
+    const initial = window.setTimeout(sync, 0)
+    const timer = window.setInterval(sync, 1000)
+    return () => { window.clearTimeout(initial); window.clearInterval(timer) }
+  }, [running, endsAt])
+  return <strong>{formatMinutes(running ? remaining : secondsLeft)}</strong>
+}
 
 export function FocusControls({
   running,
   secondsLeft,
+  endsAt,
   durationMinutes,
   focusLabel,
   onDurationChange,
@@ -27,6 +40,7 @@ export function FocusControls({
 }: {
   running: boolean
   secondsLeft: number
+  endsAt?: string
   durationMinutes: number
   focusLabel: string
   onDurationChange: (durationMinutes: number) => void
@@ -48,7 +62,7 @@ export function FocusControls({
     <div className="focus-console">
       <div className="timer-readout">
         <TimerReset size={18} />
-        <strong>{formatMinutes(secondsLeft)}</strong>
+        <Countdown running={running} endsAt={endsAt} secondsLeft={secondsLeft} />
         <span>{focusLabel}</span>
       </div>
 

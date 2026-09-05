@@ -82,7 +82,6 @@ export const getElapsedFocusSeconds = (focus: FocusSession, now = Date.now()) =>
  */
 export const isPausedFocusSession = (focus: FocusSession) =>
   !focus.running &&
-  Boolean(focus.projectId) &&
   Boolean(focus.taskLabel) &&
   focus.secondsLeft > 0 &&
   focus.secondsLeft < focus.durationMinutes * 60

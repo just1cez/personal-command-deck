@@ -88,6 +88,7 @@ import { normalizeQuotes } from './quotes'
  */
 const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] => {
   if (!Array.isArray(value)) return fallback
+  const usedIds = new Set<string>()
 
   const tasks = value
     .map((item) => {
@@ -98,8 +99,11 @@ const normalizeTasks = (value: unknown, fallback = defaultState.tasks): Task[] =
       const kind = item.kind === 'top' || item.kind === 'todo' ? item.kind : 'todo'
       const done = booleanValue(item.done)
 
+      let id = trimmedText(item.id) || uid()
+      while (usedIds.has(id)) id = uid()
+      usedIds.add(id)
       const task: Task = {
-        id: trimmedText(item.id) || uid(),
+        id,
         title,
         done,
         kind,
@@ -172,6 +176,7 @@ const normalizeDesktopNotes = (value: unknown): DesktopNote[] => {
 
 const normalizeProjects = (value: unknown): Project[] => {
   if (!Array.isArray(value)) return defaultState.projects
+  const usedIds = new Set<string>()
 
   const projects = value
     .map((item) => {
@@ -182,8 +187,11 @@ const normalizeProjects = (value: unknown): Project[] => {
       const active = item.active !== false
       const minutes = clampedNumber(item.minutes, 0, FOCUS_MINUTES_TOTAL_MAX, 0)
 
+      let id = trimmedText(item.id) || uid()
+      while (usedIds.has(id)) id = uid()
+      usedIds.add(id)
       const project: Project = {
-        id: trimmedText(item.id) || uid(),
+        id,
         name,
         nextAction: trimmedText(item.nextAction),
         minutes,
@@ -211,6 +219,7 @@ const normalizeProjects = (value: unknown): Project[] => {
 
 const normalizeQuickLinks = (value: unknown): QuickLink[] => {
   if (!Array.isArray(value)) return defaultState.quickLinks
+  const usedIds = new Set<string>()
 
   const links = value
     .map((item) => {
@@ -221,8 +230,11 @@ const normalizeQuickLinks = (value: unknown): QuickLink[] => {
       if (!label || !url) return null
 
       const icon = trimmedText(item.icon, 'link')
+      let id = trimmedText(item.id) || uid()
+      while (usedIds.has(id)) id = uid()
+      usedIds.add(id)
       return {
-        id: trimmedText(item.id) || uid(),
+        id,
         label,
         url,
         icon: selectableLinkIcons.has(icon) ? icon : 'link',
@@ -235,14 +247,18 @@ const normalizeQuickLinks = (value: unknown): QuickLink[] => {
 
 const normalizeInbox = (value: unknown, fallback = defaultState.inbox): InboxItem[] => {
   if (!Array.isArray(value)) return fallback
+  const usedIds = new Set<string>()
 
   return value
     .map((item) => {
       if (!isPlainObject(item)) return null
       const text = trimmedText(item.text)
       if (!text) return null
+      let id = trimmedText(item.id) || uid()
+      while (usedIds.has(id)) id = uid()
+      usedIds.add(id)
       return {
-        id: trimmedText(item.id) || uid(),
+        id,
         text,
         createdAt: textValue(item.createdAt, new Date().toISOString()),
       }
@@ -252,14 +268,18 @@ const normalizeInbox = (value: unknown, fallback = defaultState.inbox): InboxIte
 
 const normalizeReminders = (value: unknown): Reminder[] => {
   if (!Array.isArray(value)) return defaultState.reminders
+  const usedIds = new Set<string>()
 
   const reminders = value
     .map((item) => {
       if (!isPlainObject(item)) return null
       const title = trimmedText(item.title)
       if (!title) return null
+      let id = trimmedText(item.id) || uid()
+      while (usedIds.has(id)) id = uid()
+      usedIds.add(id)
       return {
-        id: trimmedText(item.id) || uid(),
+        id,
         title,
         date: isLocalDateString(item.date) ? item.date : dateAfter(DEFAULT_REMINDER_LEAD_DAYS),
         type: trimmedText(item.type, 'Deadline') || 'Deadline',
@@ -331,6 +351,7 @@ export const normalizeFocusRecords = (value: unknown): FocusRecord[] => {
 
 const normalizeArchives = (value: unknown): DailyArchive[] => {
   if (!Array.isArray(value)) return defaultState.archives
+  const usedIds = new Set<string>()
 
   return value
     .map((item) => {
@@ -350,9 +371,12 @@ const normalizeArchives = (value: unknown): DailyArchive[] => {
         FOCUS_SECONDS_MAX,
         legacyTotalMinutes * 60,
       )
+      let id = trimmedText(item.id) || uid()
+      while (usedIds.has(id)) id = uid()
+      usedIds.add(id)
 
       return {
-        id: trimmedText(item.id) || uid(),
+        id,
         date: isLocalDateString(item.date) ? item.date : todayIso(),
         createdAt: textValue(item.createdAt, new Date().toISOString()),
         // 归档是只读快照，这里再过滤一次完成状态，避免历史脏数据自相矛盾。
@@ -565,7 +589,6 @@ const restoreFocusSession = (
   )
   const storedTaskLabel = textValue(parsed.focus?.taskLabel)
   const hasPausedSession =
-    Boolean(projectId) &&
     Boolean(storedTaskLabel) &&
     storedSecondsLeft > 0 &&
     storedSecondsLeft < durationMinutes * 60

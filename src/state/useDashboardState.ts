@@ -20,12 +20,13 @@ import { debugLog, installDebugBridge } from '../debug'
 import { requestStorageFlush } from '../services/desktopBridge'
 import type { DashboardState } from '../types'
 import type { DashboardStore, UpdateDashboard } from './deckContext'
-import { loadDashboardState, saveDashboardState } from './storage'
+import { loadDashboardWithStatus, saveDashboardState } from './storage'
 
 export const useDashboardState = (): DashboardStore => {
   // 惰性初始化：读盘 + 规范化只在首次渲染时做一次。
-  const [dashboard, setDashboard] = useState<DashboardState>(() => loadDashboardState())
-  const [notice, setNotice] = useState('')
+  const [loaded] = useState(loadDashboardWithStatus)
+  const [dashboard, setDashboard] = useState<DashboardState>(loaded.dashboard)
+  const [notice, setNotice] = useState(loaded.notice)
 
   // 分三组各自 memo：专注计时每秒只动 focus 字段，
   // 这样项目和提醒的派生结果能保持同一份引用，下游的 useMemo 不会被无谓地打断。

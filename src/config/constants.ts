@@ -21,6 +21,8 @@ import type { GlobalShortcutStatus } from '../types'
 
 /** 仪表盘主数据在 localStorage 中的键；改动它等于放弃全部历史数据。 */
 export const STORAGE_KEY = 'personal-command-dashboard-v1'
+export const STORAGE_RECOVERY_KEY = `${STORAGE_KEY}-recovery`
+export const STORAGE_CORRUPT_KEY = `${STORAGE_KEY}-corrupt`
 
 /** 记住用户上次停留的主视图（聚焦 / 推进 / 复盘）。 */
 export const MAIN_VIEW_STORAGE_KEY = 'personal-command-deck-main-view'
@@ -186,6 +188,8 @@ export const DEFAULT_SHORTCUT_STATUS: GlobalShortcutStatus = {
 /** 顶部/底部提示条里出现的一次性状态提示。 */
 export const NOTICE = {
   storageFailure: '本地存储写入失败，请先导出备份后再清理数据',
+  storageRecovered: '本地数据读取失败，已恢复最近一次有效快照；原始数据已保留',
+  storageCorrupt: '本地数据读取失败，原始数据会保留后再保存；可尝试导入备份恢复',
   invalidLink: '链接无效：只支持 http/https 地址',
 
   focusRecorded: (projectName: string, minutes: number) =>

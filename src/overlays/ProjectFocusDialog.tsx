@@ -13,7 +13,7 @@ import {
   FOCUS_MINUTES_MIN,
   FOCUS_MINUTES_STEP,
 } from '../config/constants'
-import { useWindowKeyDown } from '../hooks/useWindowKeyDown'
+import { Dialog } from '../components/ui/Dialog'
 import { useDashboardStore, useDeckUi } from '../state/deckContext'
 import type { SelectOption } from '../types'
 
@@ -26,16 +26,6 @@ export function ProjectFocusDialog() {
     setProjectFocusTaskId,
   } = useDeckUi()
   const { projectFocusTarget, startProjectFocus } = useFocusActions()
-
-  // 弹窗打开期间：Esc 关闭、回车开始。
-  // 分钟输入框会 stopPropagation，所以在里面按回车只是收起输入，不会误触发开始。
-  useWindowKeyDown((event) => {
-    if (event.key === 'Escape') closeProjectFocusDraft()
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      startProjectFocus()
-    }
-  }, Boolean(projectFocusTarget))
 
   if (!projectFocusTarget) return null
 
@@ -50,12 +40,7 @@ export function ProjectFocusDialog() {
   ]
 
   return (
-    <div
-      className="command-overlay focus-dialog-overlay"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={closeProjectFocusDraft}
-    >
+    <Dialog label="项目专注" className="focus-dialog-overlay" onClose={closeProjectFocusDraft}>
       <div className="focus-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="focus-dialog-head">
           <div>
@@ -165,6 +150,6 @@ export function ProjectFocusDialog() {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

@@ -7,11 +7,12 @@
  *
  * 只有 `running` 为真时才挂定时器，空闲时完全没有开销。
  */
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { FOCUS_TICK_MS, IDLE_FOCUS_LABEL } from '../config/constants'
 import {
   getFocusSecondsLeft,
   getFocusSegmentSeconds,
+  formatFocusRecordNotice,
   resetFocusSession,
   settleFocusSegment,
 } from '../domain/focus'
@@ -21,6 +22,19 @@ import { useDashboardStore } from '../state/deckContext'
 export const useFocusTimer = () => {
   const { dashboard, setDashboard, queueNotice } = useDashboardStore()
   const running = dashboard.focus.running
+  const previousFocus = useRef(dashboard.focus)
+
+  // 只对已提交的状态发通知，避免 StrictMode 重放 updater 时重复弹出。
+  useEffect(() => {
+    const previous = previousFocus.current
+    previousFocus.current = dashboard.focus
+    const record = dashboard.focusRecords.at(-1)
+    if (!previous.running || running || record?.endReason !== 'completed') return
+    if (previous.sessionId && record.sessionId !== previous.sessionId) return
+    const notice = record.projectName ? formatFocusRecordNotice(record.projectName, record.actualSeconds) : ''
+    if (notice) queueNotice(notice)
+    notifyFocusComplete(record.targetLabel, notice)
+  }, [dashboard.focus, dashboard.focusRecords, queueNotice, running])
 
   useEffect(() => {
     if (!running) return
@@ -32,31 +46,20 @@ export const useFocusTimer = () => {
         if (!current.focus.running) return current
 
         const secondsLeft = getFocusSecondsLeft(current.focus.endsAt)
-        if (secondsLeft > 0) {
-          // 秒数没变就返回原对象，避免每秒都产生一次无意义的重渲染与写盘。
-          return secondsLeft === current.focus.secondsLeft
-            ? current
-            : { ...current, focus: { ...current.focus, secondsLeft } }
-        }
+        // 显示秒数由局部计时器计算；没有业务变化就不写全局状态和存储。
+        if (secondsLeft > 0) return current
 
         // 本轮自然结束。至少记 1 秒，保证"跑完一轮"一定留下痕迹。
         const elapsedSeconds = Math.max(
           1,
           getFocusSegmentSeconds(current.focus.startedAt, current.focus.endsAt),
         )
-        const { projects, tasks, focusRecords, notice } = settleFocusSegment(
+        const { projects, tasks, focusRecords } = settleFocusSegment(
           current,
           elapsedSeconds,
           'completed',
           current.focus.endsAt ?? new Date().toISOString(),
         )
-        if (notice) queueNotice(notice)
-
-        // 用户很可能已经切到别的窗口了，界面里的提示看不见，补一条系统通知。
-        // 延后一拍发出，避免在计算新状态的过程中触发副作用。
-        const finishedLabel = current.focus.taskLabel
-        window.setTimeout(() => notifyFocusComplete(finishedLabel, notice), 0)
-
         return {
           ...current,
           projects,
@@ -72,5 +75,5 @@ export const useFocusTimer = () => {
     syncFocusClock()
     const interval = window.setInterval(syncFocusClock, FOCUS_TICK_MS)
     return () => window.clearInterval(interval)
-  }, [queueNotice, running, setDashboard])
+  }, [running, setDashboard])
 }
