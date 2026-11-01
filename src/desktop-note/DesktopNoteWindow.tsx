@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   CalendarPlus,
   Check,
@@ -12,116 +12,54 @@ import {
 import { DESKTOP_NOTE_CONTENT_MAX_LENGTH } from '../config/constants'
 import { desktopNoteColorOptions } from '../config/options'
 import { getDesktopBridge } from '../services/desktopBridge'
-import type { DesktopNote, DesktopNoteColor } from '../types'
+import { NoteEditor, prepareNoteEditors, releaseNoteEditors, registerNoteEditor } from '../services/noteEditor'
+import type { DesktopNoteColor } from '../types'
 import './DesktopNoteWindow.css'
 
 const params = new URLSearchParams(window.location.search)
 const noteId = params.get('noteId') ?? ''
 
 export function DesktopNoteWindow() {
-  const [note, setNote] = useState<DesktopNote | null>(null)
-  const [loadError, setLoadError] = useState(() =>
-    noteId && getDesktopBridge()?.getDesktopNote
-      ? ''
-      : '桌面便笺窗口仅在桌面版可用',
-  )
-  const [saveState, setSaveState] = useState<'saved' | 'saving'>('saved')
-  const [feedback, setFeedback] = useState<{
-    message: string
-    kind: 'success' | 'prompt' | 'error'
-  } | null>(null)
-  const saveTimer = useRef<number | null>(null)
-  const latestContent = useRef('')
+  const [editor] = useState(() => new NoteEditor(async (patch, requestId) => {
+    const save = getDesktopBridge()?.patchDesktopNote
+    if (!save) throw new Error('保存服务不可用')
+    return save(noteId, patch, requestId)
+  }))
+  const { note, status: saveState, error: saveError } = useSyncExternalStore(editor.subscribe, editor.getSnapshot)
+  const [loadError, setLoadError] = useState(() => getDesktopBridge()?.getDesktopNote ? '' : '桌面便笺窗口仅在桌面版可用')
+  const [feedback, setFeedback] = useState<{ message: string; kind: 'success' | 'prompt' | 'error' } | null>(null)
   const feedbackTimer = useRef<number | null>(null)
+  const taskRequest = useRef<{ action: string; id: string } | null>(null)
+  const actionFlight = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     document.title = '桌面便笺'
     const bridge = getDesktopBridge()
-    if (!noteId || !bridge?.getDesktopNote) return
-    void bridge
-      .getDesktopNote(noteId)
-      .then((snapshot) => {
-        if (!snapshot) {
-          setLoadError('便笺不存在或已经被删除')
-          return
-        }
-        latestContent.current = snapshot.content
-        setNote(snapshot)
-      })
-      .catch(() => setLoadError('便笺加载失败，请重新打开'))
-    if (!bridge.onDesktopNoteSnapshot) return
-    return bridge.onDesktopNoteSnapshot((snapshot) => {
-      if (snapshot.id !== noteId) return
-      // 主窗口可能只改了颜色或置顶；本地仍有待保存文字时不能被旧快照覆盖。
-      if (saveTimer.current) {
-        setNote({ ...snapshot, content: latestContent.current })
-        return
-      }
-      latestContent.current = snapshot.content
-      setNote(snapshot)
-      setSaveState('saved')
+    let mounted = true
+    void bridge?.getDesktopNote?.(noteId).then(snapshot => {
+      if (!mounted) return
+      if (snapshot) editor.receive(snapshot)
+      else setLoadError('便笺不存在或已经被删除')
+    }).catch(() => { if (mounted) setLoadError('便笺加载失败，请重新打开') })
+    const unsubscribe = bridge?.onDesktopNoteSnapshot?.(snapshot => {
+      if (snapshot.id === noteId) editor.receive(snapshot)
     })
-  }, [])
-
-  useEffect(
-    () => () => {
-      if (saveTimer.current) window.clearTimeout(saveTimer.current)
-      if (feedbackTimer.current) window.clearTimeout(feedbackTimer.current)
-    },
-    [],
-  )
-
-  useEffect(() => {
-    const flushBeforeClose = () => {
-      getDesktopBridge()?.flushDesktopNote?.(noteId, latestContent.current)
+    const unregister = registerNoteEditor(async () => {
+      if (!editor.state.note) throw new Error('便笺尚未加载，请稍后重试')
+      await editor.flush()
+      await actionFlight.current
+    })
+    const unprepare = bridge?.onNotePrepare?.(prepareNoteEditors)
+    const unrelease = bridge?.onNoteRelease?.(releaseNoteEditors)
+    return () => {
+      mounted = false; unsubscribe?.(); unregister(); unprepare?.(); unrelease?.(); editor.cancelTimer()
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current)
     }
-    window.addEventListener('beforeunload', flushBeforeClose)
-    return () => window.removeEventListener('beforeunload', flushBeforeClose)
-  }, [])
+  }, [editor])
 
-  const patch = (value: Partial<Pick<DesktopNote, 'content' | 'color' | 'alwaysOnTop'>>) => {
-    const bridge = getDesktopBridge()
-    if (!bridge?.patchDesktopNote || !note) return
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    const nextPatch = { ...value, content: latestContent.current }
-    setNote({ ...note, ...nextPatch })
-    setSaveState('saving')
-    void bridge
-      .patchDesktopNote(note.id, nextPatch)
-      .then(() => setSaveState('saved'))
-      .catch(() => {
-        setSaveState('saved')
-        showFeedback('保存失败，请重试', 'error')
-      })
-  }
-
-  const changeContent = (content: string) => {
-    if (!note) return
-    latestContent.current = content
-    setNote({ ...note, content })
-    setSaveState('saving')
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null
-      const bridge = getDesktopBridge()
-      if (!bridge?.patchDesktopNote) return
-      void bridge
-        .patchDesktopNote(note.id, { content })
-        .then(() => setSaveState('saved'))
-        .catch(() => {
-          setSaveState('saved')
-          showFeedback('保存失败，请重试', 'error')
-        })
-    }, 280)
-  }
-
-  const flushContent = () => {
-    if (!saveTimer.current) return
-    patch({ content: latestContent.current })
-  }
+  const patch = (value: Parameters<NoteEditor['edit']>[0]) => editor.edit(value, true)
+  const changeContent = (content: string) => editor.edit({ content })
+  const flushContent = () => { void editor.flush().catch(() => undefined) }
 
   const showFeedback = (
     message: string,
@@ -133,36 +71,30 @@ export function DesktopNoteWindow() {
   }
 
   const runAction = async (action: 'close' | 'delete' | 'add-today' | 'add-tomorrow') => {
-    if (!note) return
+    if (!note || actionFlight.current) return
     const bridge = getDesktopBridge()
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    const isTaskAction = action === 'add-today' || action === 'add-tomorrow'
-    if (isTaskAction && !latestContent.current.split(/\r?\n/).some((line) => line.trim())) {
-      showFeedback('请先写下便笺内容', 'prompt')
+    if (action === 'close') {
+      try { await bridge?.runDesktopNoteAction?.(noteId, action) }
+      catch { showFeedback('关闭失败，草稿已保留，请重试', 'error') }
       return
     }
-
-    try {
-      if (action !== 'delete' && bridge?.patchDesktopNote) {
-        await bridge.patchDesktopNote(note.id, { content: latestContent.current })
+    const perform = async () => {
+      try {
+        if (action !== 'delete') await editor.flush()
+        else editor.cancelTimer()
+        if (taskRequest.current?.action !== action) taskRequest.current = { action, id: crypto.randomUUID() }
+        const result = await bridge?.runDesktopNoteAction?.(noteId, action, taskRequest.current.id)
+        if (!result?.accepted) throw new Error(result?.error || '操作失败，请重试')
+        taskRequest.current = null
+        if (action !== 'delete') showFeedback(action === 'add-today' ? '已添加到今日任务' : '已添加到明日任务')
+      } catch (error) {
+        showFeedback(error instanceof Error ? error.message : '操作失败，请重试', 'error')
+        throw error
       }
-      const result = await bridge?.runDesktopNoteAction?.(note.id, action)
-      if (isTaskAction) {
-        showFeedback(
-          result?.accepted
-            ? action === 'add-today'
-              ? '已添加到今日任务'
-              : '已添加到明日任务'
-            : '添加失败，请重试',
-          result?.accepted ? 'success' : 'error',
-        )
-      }
-    } catch {
-      if (isTaskAction) showFeedback('添加失败，请重试', 'error')
     }
+    actionFlight.current = perform()
+    try { await actionFlight.current } catch { /* 草稿和请求 ID 保留供重试。 */ }
+    finally { actionFlight.current = null }
   }
 
   if (!note) {
@@ -195,7 +127,6 @@ export function DesktopNoteWindow() {
             onClick={() => {
               const alwaysOnTop = !note.alwaysOnTop
               patch({ alwaysOnTop })
-              showFeedback(alwaysOnTop ? '已保持在最前' : '已取消置顶')
             }}
           >
             <Pin size={15} fill={note.alwaysOnTop ? 'currentColor' : 'none'} />
@@ -219,11 +150,11 @@ export function DesktopNoteWindow() {
           if (event.ctrlKey && event.key === 'Enter') {
             event.preventDefault()
             void runAction('add-today')
-            setSaveState('saved')
           }
         }}
       />
 
+      {saveError && <p role="alert" className="desktop-note-feedback desktop-note-feedback-error">{saveError}</p>}
       {feedback && (
         <div
           className={`desktop-note-feedback desktop-note-feedback-${feedback.kind}`}
@@ -259,7 +190,8 @@ export function DesktopNoteWindow() {
 
         <span className="desktop-note-save-state">
           <Check size={12} />
-          {saveState === 'saving' ? '保存中' : '已保存'}
+          {saveState === 'saving' ? '保存中' : saveState === 'failed' ? '保存失败' : '已保存'}
+          {saveState === 'failed' && <button type="button" title={saveError} onClick={flushContent}>重试保存</button>}
         </span>
 
         <div className="desktop-note-actions">

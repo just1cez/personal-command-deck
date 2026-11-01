@@ -72,6 +72,12 @@ export const saveDashboardState = (state: DashboardState) => {
       localStorage.setItem(STORAGE_RECOVERY_KEY, JSON.stringify(snapshot))
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    // A successful write means the previous corrupt payload is no longer
+    // needed. Keep only the latest recovery snapshot and avoid accumulating
+    // stale damaged data in the user's local storage.
+    if (typeof localStorage.removeItem === 'function') {
+      localStorage.removeItem(STORAGE_CORRUPT_KEY)
+    }
     return true
   } catch (error) {
     debugWarn('storage', '本地数据写入失败', error)

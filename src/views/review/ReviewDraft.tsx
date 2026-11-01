@@ -114,9 +114,10 @@ export function ReviewDraft() {
           {dashboard.ai.enabled && ai.settingsIssue && (
             <p className="ai-error">{ai.settingsIssue}</p>
           )}
-          {ai.error && <p className="ai-error">{ai.error}</p>}
         </div>
       )}
+
+      {ai.error && <p className="ai-error" role="alert">{ai.error}</p>}
 
       <div className="review-summary">
         <div>

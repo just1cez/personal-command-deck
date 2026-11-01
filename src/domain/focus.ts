@@ -25,6 +25,7 @@ import type {
   Task,
 } from '../types'
 import { clamp, formatLocalDate, uid } from '../utils'
+import { splitFocusRecordByDate } from './focusRecords'
 
 /* -------------------------------------------------------------------------- */
 /* 时间换算                                                                    */
@@ -229,7 +230,9 @@ export const settleFocusSegment = (
   return {
     projects,
     tasks: settleTasks(current, seconds),
-    focusRecords: [...current.focusRecords, record].slice(-FOCUS_RECORD_LIMIT),
+    focusRecords: [...current.focusRecords, ...splitFocusRecordByDate(record, [
+      ...current.archives.flatMap(archive => archive.focusRecords), ...current.focusRecords,
+    ])].slice(-FOCUS_RECORD_LIMIT),
     sessionId,
     notice,
   }

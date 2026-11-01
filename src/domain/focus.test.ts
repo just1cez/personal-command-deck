@@ -133,3 +133,42 @@ describe('settleFocusSegment', () => {
     expect(result.tasks).toBe(state.tasks)
   })
 })
+
+it('splits midnight focus, counts the plan once, and preserves entity totals', async () => {
+  const { normalizeDashboardState } = await import('../state/normalize')
+  const { selectDailyFocus } = await import('./focusRecords')
+  const { formatLocalDate } = await import('../utils')
+  const start = new Date(2026, 8, 22, 23, 50)
+  const end = new Date(2026, 8, 23, 0, 15)
+  const state = focusedState()
+  state.archives = []
+  state.focus.startedAt = start.toISOString()
+  state.focus.endsAt = end.toISOString()
+  const result = settleFocusSegment(state, 1500, 'completed', end.toISOString())
+  expect(result.focusRecords.map(record => record.actualSeconds)).toEqual([600, 900])
+  expect(result.focusRecords.map(record => record.plannedSeconds)).toEqual([1500, 0])
+  expect(result.projects[0].focusSeconds).toBe(state.projects[0].focusSeconds + 1500)
+  expect(result.tasks[0].focusSeconds).toBe((state.tasks[0].focusSeconds ?? 0) + 1500)
+  expect(computeFocusRecordStats(result.focusRecords).plannedSeconds).toBe(1500)
+  expect(selectDailyFocus({ ...state, ...result }, formatLocalDate(end)).actualSeconds).toBe(900)
+  vi.useFakeTimers()
+  vi.setSystemTime(end)
+  const recovered = normalizeDashboardState(state)
+  expect(recovered.focusRecords.map(record => record.actualSeconds)).toEqual([600, 900])
+  const reloaded = normalizeDashboardState(recovered)
+  expect(reloaded.focusRecords.map(record => record.plannedSeconds)).toEqual([1500, 0])
+})
+
+it('does not count a new plan when resuming on the following day', () => {
+  const state = focusedState()
+  state.archives = []
+  state.focus.startedAt = new Date(2026, 8, 22, 23, 50).toISOString()
+  state.focus.endsAt = new Date(2026, 8, 23, 0, 15).toISOString()
+  const first = settleFocusSegment(state, 300, 'paused', new Date(2026, 8, 22, 23, 55).toISOString())
+  const resumed = { ...state, ...first, focus: { ...state.focus,
+    startedAt: new Date(2026, 8, 23, 0, 10).toISOString(),
+    endsAt: new Date(2026, 8, 23, 0, 30).toISOString(),
+  } }
+  const second = settleFocusSegment(resumed, 1200, 'completed', resumed.focus.endsAt)
+  expect(second.focusRecords.map(record => record.plannedSeconds)).toEqual([1500, 0])
+})

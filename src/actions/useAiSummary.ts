@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ERROR_TEXT, NOTICE } from '../config/constants'
 import { aiProviderDefaults } from '../config/options'
-import { buildLocalSummary } from '../domain/summary'
+import { buildLocalSummary, buildReviewInputSnapshot } from '../domain/summary'
 import {
   buildReviewPrompt,
   getAiSettingsIssue,
@@ -81,6 +81,7 @@ export const useAiSummary = () => {
       updateDashboard(
         (current) => ({
           ...current,
+          reviewSummaryInput: buildReviewInputSnapshot(current),
           reviewSummary: buildLocalSummary(
             current.review,
             current.tasks.filter((task) => task.done),
@@ -115,7 +116,7 @@ export const useAiSummary = () => {
       const latest = latestDashboard.current
       // 请求期间修改了输入、配置或总结时，旧结果不得覆盖新内容。
       if (latest.ai !== dashboard.ai || latest.reviewSummary !== originalSummary || buildReviewPrompt(latest) !== prompt) return
-      updateDashboard((current) => ({ ...current, reviewSummary: summary }), '生成 AI 总结')
+      updateDashboard((current) => ({ ...current, reviewSummary: summary, reviewSummaryInput: buildReviewInputSnapshot(current) }), '生成 AI 总结')
       showNotice(NOTICE.aiSummaryReady)
     } catch (requestError) {
       if (controller.signal.aborted) return

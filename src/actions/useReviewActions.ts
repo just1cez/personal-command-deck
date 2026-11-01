@@ -9,7 +9,7 @@ import { useDashboardStore } from '../state/deckContext'
 import type { DailyReview, DashboardState } from '../types'
 
 export const useReviewActions = () => {
-  const { dashboard, updateDashboard, showNotice } = useDashboardStore()
+  const { dashboard, updateDashboard, showNotice, queueNotice } = useDashboardStore()
 
   /** 更新三段式复盘中的某一段。 */
   const updateReview = useCallback(
@@ -25,10 +25,14 @@ export const useReviewActions = () => {
   /** 归档今天；同一天重复归档会覆盖上一次的记录。 */
   const archiveToday = useCallback(() => {
     updateDashboard((current) => {
-      return archiveDashboardToday(current)
+      const archived = archiveDashboardToday(current)
+      if (current.reviewSummary && archived.reviewSummary !== current.reviewSummary) {
+        queueNotice('输入已变化，归档已更新总结')
+      }
+      return archived
     }, '归档今天')
     showNotice(NOTICE.archived)
-  }, [showNotice, updateDashboard])
+  }, [queueNotice, showNotice, updateDashboard])
 
   /**
    * 删除一条归档。

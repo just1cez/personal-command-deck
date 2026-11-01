@@ -24,9 +24,9 @@ export type DesktopSettingsPayload = {
   shortcut: GlobalShortcutStatus
 }
 
-export type DesktopNoteCommand =
-  | { type: 'patch'; id: string; patch: Partial<DesktopNote> }
-  | { type: 'closed' | 'delete' | 'add-today' | 'add-tomorrow'; id: string }
+export type { NoteCommand as DesktopNoteCommand, NoteResult } from '../domain/desktopNoteCommands'
+import type { NoteCommand, NoteResult } from '../domain/desktopNoteCommands'
+export type NoteSnapshot = DesktopNote & { version: number }
 
 export type CommandDeckBridge = {
   /** 由主进程代发 AI 请求，避免渲染进程直接暴露 API Key。 */
@@ -41,21 +41,24 @@ export type CommandDeckBridge = {
   /** 发送系统通知（Windows toast）。 */
   notify?: (request: { title: string; body: string }) => Promise<unknown>
   markStorageChanged?: () => void
-  syncDesktopNotes?: (notes: DesktopNote[]) => Promise<{ synced: boolean }>
-  getDesktopNote?: (noteId: string) => Promise<DesktopNote | null>
+  syncDesktopNotes?: (notes: DesktopNote[], version: number) => Promise<{ synced: boolean }>
+  acknowledgeNoteCommand?: (result: NoteResult) => void
+  onNotePrepare?: (callback: (requestId: string) => Promise<void>) => () => void
+  onNoteRelease?: (callback: () => void) => () => void
+  getDesktopNote?: (noteId: string) => Promise<NoteSnapshot | null>
   showDesktopNote?: (noteId: string) => Promise<{ shown: boolean }>
   patchDesktopNote?: (
     noteId: string,
     patch: Partial<Pick<DesktopNote, 'content' | 'color' | 'alwaysOnTop'>>,
-  ) => Promise<{ accepted: boolean }>
-  /** 关闭窗口前同步提交最后一版文字，避免系统关闭手势早于防抖保存。 */
-  flushDesktopNote?: (noteId: string, content: string) => void
+    requestId?: string,
+  ) => Promise<NoteResult>
   runDesktopNoteAction?: (
     noteId: string,
     action: 'close' | 'delete' | 'add-today' | 'add-tomorrow',
-  ) => Promise<{ accepted: boolean }>
-  onDesktopNoteCommand?: (callback: (command: DesktopNoteCommand) => void) => () => void
-  onDesktopNoteSnapshot?: (callback: (note: DesktopNote) => void) => () => void
+    requestId?: string,
+  ) => Promise<NoteResult>
+  onDesktopNoteCommand?: (callback: (command: NoteCommand) => void) => () => void
+  onDesktopNoteSnapshot?: (callback: (note: NoteSnapshot) => void) => () => void
 }
 
 declare global {

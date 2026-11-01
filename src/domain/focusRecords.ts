@@ -1,3 +1,4 @@
+import { formatLocalDate } from '../utils'
 import type { DashboardState, FocusRecord } from '../types'
 
 export type FocusRecordStats = {
@@ -24,9 +25,7 @@ export const computeFocusRecordStats = (records: FocusRecord[]): FocusRecordStat
   const actualSeconds = records.reduce((total, record) => total + record.actualSeconds, 0)
   const plannedBySession = new Map<string, number>()
   records.forEach((record) => {
-    if (!plannedBySession.has(record.sessionId)) {
-      plannedBySession.set(record.sessionId, record.plannedSeconds)
-    }
+    plannedBySession.set(record.sessionId, Math.max(plannedBySession.get(record.sessionId) ?? 0, record.plannedSeconds))
   })
   const plannedSeconds = [...plannedBySession.values()].reduce(
     (total, seconds) => total + seconds,
@@ -64,3 +63,36 @@ export const focusEndReasonLabels = {
 
 export const formatFocusActualMinutes = (seconds: number) =>
   seconds > 0 && seconds < 60 ? '<1' : String(Math.floor(seconds / 60))
+
+/** 按本地午夜拆段；累计取整保证分段秒数之和不变。计划只属于首次结算日。 */
+export const splitFocusRecordByDate = (record: FocusRecord, previous: FocusRecord[] = []): FocusRecord[] => {
+  const start = new Date(record.startedAt).getTime()
+  const end = new Date(record.endedAt).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [record]
+  const planDate = previous.find(item => item.sessionId === record.sessionId && item.plannedSeconds > 0)?.date
+    ?? formatLocalDate(new Date(start))
+  const records: FocusRecord[] = []
+  let cursor = start
+  let allocated = 0
+  while (cursor < end) {
+    const midnight = new Date(cursor)
+    midnight.setHours(24, 0, 0, 0)
+    const boundary = Math.min(end, midnight.getTime())
+    const cumulative = boundary === end
+      ? record.actualSeconds
+      : Math.floor(record.actualSeconds * (boundary - start) / (end - start))
+    const date = formatLocalDate(new Date(cursor))
+    records.push({
+      ...record,
+      id: records.length ? `${record.id}:${date}` : record.id,
+      date,
+      startedAt: new Date(cursor).toISOString(),
+      endedAt: new Date(boundary).toISOString(),
+      actualSeconds: cumulative - allocated,
+      plannedSeconds: date === planDate ? record.plannedSeconds : 0,
+    })
+    allocated = cumulative
+    cursor = boundary
+  }
+  return records
+}

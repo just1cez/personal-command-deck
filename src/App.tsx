@@ -24,7 +24,6 @@ import { ProjectFocusDialog } from './overlays/ProjectFocusDialog'
 import { QuoteManagerDialog } from './overlays/QuoteManagerDialog'
 import { useClock } from './hooks/useClock'
 import { useFocusTimer } from './hooks/useFocusTimer'
-import { useDesktopNoteWindows } from './actions/useDesktopNoteWindows'
 import {
   useDailyCarryover,
   useDailyQuoteSync,
@@ -58,7 +57,6 @@ function AppShell() {
   const { activeMainView } = useDeckUi()
 
   useFocusTimer()
-  useDesktopNoteWindows()
   useDailyQuoteSync()
   useRetentionSweep()
 

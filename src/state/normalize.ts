@@ -38,6 +38,7 @@ import {
   validDesktopNoteColors,
   validThemes,
 } from '../config/options'
+import { splitFocusRecordByDate } from '../domain/focusRecords'
 import { normalizeDesktopNoteBounds } from '../domain/desktopNotes'
 import { applyRetentionPolicy } from '../domain/retention'
 import type {
@@ -325,7 +326,7 @@ export const normalizeFocusRecords = (value: unknown): FocusRecord[] => {
         endedAt: item.endedAt,
         plannedSeconds: clampedNumber(
           item.plannedSeconds,
-          FOCUS_MINUTES_MIN * 60,
+          0,
           FOCUS_MINUTES_MAX * 60,
           defaultState.focus.durationMinutes * 60,
         ),
@@ -524,6 +525,7 @@ export const normalizeDashboardState = (
       tomorrow: textValue(parsed.review?.tomorrow),
     },
     reviewSummary: textValue(parsed.reviewSummary),
+    reviewSummaryInput: textValue(parsed.reviewSummaryInput),
     ai: {
       enabled: booleanValue(parsed.ai?.enabled),
       provider,
@@ -651,7 +653,9 @@ const restoreFocusSession = (
           )
         : tasks,
     focusRecords: recoveredRecord
-      ? [...focusRecords, recoveredRecord].slice(-FOCUS_RECORD_LIMIT)
+      ? [...focusRecords, ...splitFocusRecordByDate(recoveredRecord, [
+          ...normalizeArchives(parsed.archives).flatMap(archive => archive.focusRecords), ...focusRecords,
+        ])].slice(-FOCUS_RECORD_LIMIT)
       : focusRecords,
   }
 }

@@ -321,6 +321,7 @@ export type DashboardState = {
   reminders: Reminder[]
   review: DailyReview
   reviewSummary: string
+  reviewSummaryInput: string
   ai: AiSettings
   retention: RetentionSettings
   archives: DailyArchive[]

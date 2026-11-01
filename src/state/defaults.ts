@@ -100,6 +100,7 @@ export const defaultState: DashboardState = {
     tomorrow: '',
   },
   reviewSummary: '',
+  reviewSummaryInput: '',
   ai: {
     // 默认走本地总结，用户主动填了 Key 才会联网。
     enabled: false,

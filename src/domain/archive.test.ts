@@ -65,3 +65,22 @@ describe('archiveDashboardToday', () => {
     expect(today.id).toBe(first.archives[0].id)
   })
 })
+
+it('refreshes a stale summary and preserves a matching generated summary', async () => {
+  const { buildReviewInputSnapshot } = await import('./summary')
+  const now = new Date(2026, 8, 22, 12)
+  const { formatLocalDate } = await import('../utils')
+  const state = structuredClone(defaultState)
+  state.review.did = 'original input'
+  state.reviewSummary = 'custom AI summary'
+  state.reviewSummaryInput = buildReviewInputSnapshot(state, formatLocalDate(now))
+  const first = archiveDashboardToday(state, now)
+  expect(first.archives[0].summary).toBe('custom AI summary')
+  const changed = { ...first, review: { ...first.review, did: 'updated input' } }
+  const second = archiveDashboardToday(changed, now)
+  expect(second.archives[0].summary).toContain('updated input')
+  expect(second.archives[0].summary).not.toContain('original input')
+  expect(archiveDashboardToday(second, now).archives[0].summary).toBe(second.reviewSummary)
+  const legacy = { ...state, reviewSummaryInput: '' }
+  expect(archiveDashboardToday(legacy, now).reviewSummary).toContain('original input')
+})

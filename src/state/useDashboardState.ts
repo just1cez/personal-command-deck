@@ -17,16 +17,50 @@ import {
   computeTaskStats,
 } from '../domain/stats'
 import { debugLog, installDebugBridge } from '../debug'
-import { requestStorageFlush } from '../services/desktopBridge'
+import { getDesktopBridge, requestStorageFlush } from '../services/desktopBridge'
+import { applyNoteCommand } from '../domain/desktopNoteCommands'
+import type { NoteCommand, NoteResult } from '../domain/desktopNoteCommands'
+import type { Dispatch, SetStateAction } from 'react'
 import type { DashboardState } from '../types'
 import type { DashboardStore, UpdateDashboard } from './deckContext'
+import { prepareNoteEditors, releaseNoteEditors } from '../services/noteEditor'
 import { loadDashboardWithStatus, saveDashboardState } from './storage'
 
 export const useDashboardState = (): DashboardStore => {
   // 惰性初始化：读盘 + 规范化只在首次渲染时做一次。
   const [loaded] = useState(loadDashboardWithStatus)
-  const [dashboard, setDashboard] = useState<DashboardState>(loaded.dashboard)
+  const [committed, setCommitted] = useState<{
+    dashboard: DashboardState; version: number; receipts: Map<string, string | undefined>; receipt?: NoteResult
+  }>(() => ({ dashboard: loaded.dashboard, version: 0, receipts: new Map() }))
+  const { dashboard } = committed
+  const setDashboard = useCallback<Dispatch<SetStateAction<DashboardState>>>((updater) => {
+    setCommitted(current => {
+      const next = typeof updater === 'function' ? updater(current.dashboard) : updater
+      return next === current.dashboard ? current : { ...current, dashboard: next, version: current.version + 1 }
+    })
+  }, [])
+  // 命令收据和业务状态在同一次提交中生成；重试仅触发重新保存，不重做业务动作。
+  useEffect(() => getDesktopBridge()?.onDesktopNoteCommand?.((command: NoteCommand) => {
+    debugLog('store', `动作 桌面便笺 ${command.type}`)
+    setCommitted(current => {
+      const result = current.receipts.has(command.requestId)
+        ? { dashboard: current.dashboard, error: current.receipts.get(command.requestId) }
+        : applyNoteCommand(current.dashboard, command)
+      const receipts = new Map(current.receipts)
+      receipts.set(command.requestId, result.error)
+      const version = current.version + 1
+      return { dashboard: result.dashboard, receipts, version,
+        receipt: { requestId: command.requestId, version, accepted: !result.error, error: result.error } }
+    })
+  }), [])
   const [notice, setNotice] = useState(loaded.notice)
+
+  useEffect(() => {
+    const bridge = getDesktopBridge()
+    const unprepare = bridge?.onNotePrepare?.(prepareNoteEditors)
+    const unrelease = bridge?.onNoteRelease?.(releaseNoteEditors)
+    return () => { unprepare?.(); unrelease?.() }
+  }, [])
 
   // 分三组各自 memo：专注计时每秒只动 focus 字段，
   // 这样项目和提醒的派生结果能保持同一份引用，下游的 useMemo 不会被无谓地打断。
@@ -51,7 +85,7 @@ export const useDashboardState = (): DashboardStore => {
     // 写在里面会导致每个动作打印两遍。
     debugLog('store', `动作 ${action}`)
     setDashboard(updater)
-  }, [])
+  }, [setDashboard])
 
   // 提示条自动消失：它占着聚焦页和复盘页的一行位置，留太久会盖住常驻说明文案。
   useEffect(() => {
@@ -62,14 +96,22 @@ export const useDashboardState = (): DashboardStore => {
 
   // 持久化 + 主题同步。两件事都只依赖最终状态，放同一个 effect 里最直观。
   useEffect(() => {
-    if (!saveDashboardState(dashboard)) {
+    const saved = saveDashboardState(dashboard)
+    const bridge = getDesktopBridge()
+    if (!saved) {
       queueNotice(NOTICE.storageFailure)
     } else {
       requestStorageFlush()
+      void bridge?.syncDesktopNotes?.(dashboard.desktopNotes, committed.version).catch(() => undefined)
     }
+    if (committed.receipt) bridge?.acknowledgeNoteCommand?.({ ...committed.receipt,
+      version: committed.version,
+      accepted: saved && committed.receipt.accepted,
+      error: saved ? committed.receipt.error : NOTICE.storageFailure,
+    })
     document.documentElement.dataset.theme = dashboard.theme
     document.documentElement.dataset.mode = dashboard.dayMode
-  }, [dashboard, queueNotice])
+  }, [committed, dashboard, queueNotice])
 
   // 调试入口需要读到"最新"状态，用 ref 桥接，避免每次状态变化都重挂一次。
   const dashboardRef = useRef(dashboard)

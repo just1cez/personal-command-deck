@@ -10,7 +10,7 @@ import {
   mergeFocusRecords,
   selectFocusRecordsForDate,
 } from './focusRecords'
-import { buildLocalSummary } from './summary'
+import { buildLocalSummary, buildReviewInputSnapshot } from './summary'
 
 /**
  * 用当前状态生成一条归档。
@@ -27,7 +27,7 @@ export const buildArchive = (
   const openTasks = current.tasks.filter((task) => !task.done)
 
   const summary =
-    current.reviewSummary ||
+    (current.reviewSummaryInput === buildReviewInputSnapshot(current, date) ? current.reviewSummary : '') ||
     buildLocalSummary(
       current.review,
       completedTasks,
@@ -109,6 +109,7 @@ export const archiveDashboardToday = (
     archives: upsertArchive(source.archives, archive),
     focusRecords: source.focusRecords.filter((record) => record.date !== date),
     reviewSummary: archive.summary,
+    reviewSummaryInput: buildReviewInputSnapshot(source, date),
   }
 }
 

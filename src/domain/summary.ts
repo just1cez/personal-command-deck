@@ -4,7 +4,9 @@
  * 规则很简单：用户手写的内容优先，没写就从今天的数据里挑一条最合适的补上，
  * 保证"点了生成就一定有东西可看"。AI 版本的提示词在 services/aiSummary.ts。
  */
-import type { DailyReview, InboxItem, Task } from '../types'
+import { todayIso } from '../utils'
+import { selectDailyFocus } from './focusRecords'
+import type { DailyReview, DashboardState, InboxItem, Task } from '../types'
 
 export const buildLocalSummary = (
   review: DailyReview,
@@ -40,4 +42,16 @@ export const buildLocalSummary = (
   ]
     .join('\n')
     .trim()
+}
+
+/** 不含密钥或配置；归档前后相同的每日数据应得到相同快照。 */
+export const buildReviewInputSnapshot = (state: DashboardState, date = todayIso()) => {
+  const focus = selectDailyFocus(state, date)
+  return JSON.stringify({
+    date, review: state.review, tasks: state.tasks, tomorrowTasks: state.tomorrowTasks,
+    projects: state.projects, inbox: state.inbox, reminders: state.reminders,
+    dayMode: state.dayMode, energy: state.energy, currentFocus: state.currentFocus,
+    actualSeconds: focus.actualSeconds, plannedSeconds: focus.plannedSeconds,
+    segmentCount: focus.segmentCount,
+  })
 }

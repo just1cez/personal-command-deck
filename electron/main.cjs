@@ -15,6 +15,8 @@ const {
 const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+const { randomUUID } = require('node:crypto')
+const { createNoteRequests, withTimeout } = require('./note-requests.cjs')
 
 const isDev = process.env.VITE_DEV_SERVER_URL
 const appIconPath = path.join(__dirname, 'assets', 'app.ico')
@@ -24,6 +26,8 @@ const rendererIndexUrl = pathToFileURL(path.join(__dirname, '..', 'dist', 'index
 const DESKTOP_NOTE_CONTENT_MAX_LENGTH = 8_000
 const DESKTOP_NOTE_LIMIT = 100
 const DESKTOP_NOTE_OPEN_LIMIT = 6
+const DESKTOP_NOTE_ID_MAX_LENGTH = 128
+const DESKTOP_NOTE_REQUEST_ID_MAX_LENGTH = 128
 
 // Windows toast 通知需要 AppUserModelId 才能正常显示
 if (process.platform === 'win32') {
@@ -199,8 +203,7 @@ function hideMainWindow() {
 }
 
 function quitApp() {
-  isQuitting = true
-  app.quit()
+  void coordinateClose()
 }
 
 function isSafeExternalUrl(url) {
@@ -210,6 +213,18 @@ function isSafeExternalUrl(url) {
   } catch {
     return false
   }
+}
+
+function safeNoteId(value) {
+  if (typeof value !== 'string') return ''
+  const id = value.trim()
+  return id.length > 0 && id.length <= DESKTOP_NOTE_ID_MAX_LENGTH ? id : ''
+}
+
+function safeRequestId(value) {
+  if (typeof value !== 'string') return undefined
+  const id = value.trim()
+  return id.length > 0 && id.length <= DESKTOP_NOTE_REQUEST_ID_MAX_LENGTH ? id : undefined
 }
 
 function isAppUrl(url) {
@@ -370,16 +385,114 @@ function scheduleStorageFlush(targetSession = session.defaultSession) {
   }, 2_000)
 }
 
-function sendDesktopNoteCommand(command) {
-  if (!mainWindow || mainWindow.isDestroyed()) return
+const noteRequests = createNoteRequests(command => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed() || mainWindow.webContents.isCrashed()) {
+    throw new Error('主窗口不可用，内容尚未保存')
+  }
   mainWindow.webContents.send('desktop-notes:command', command)
+})
+function sendDesktopNoteCommand(command, requestId) {
+  return noteRequests.request(command, requestId)
 }
+const preparations = new Map()
+const readyEditors = new Set()
+const closingNotes = new Map()
+let exitOperation = null
+let snapshotVersion = -1
+let rendererVersion = -1
+const discardedNoteWindows = new Set()
+
+function prepareWindow(window) {
+  if (!window || window.isDestroyed() || window.webContents.isCrashed()) return Promise.reject(new Error('窗口不可用'))
+  const requestId = randomUUID()
+  const waiting = new Promise((resolve, reject) => {
+    preparations.set(requestId, { senderId: window.webContents.id, resolve, reject })
+    if (readyEditors.has(window.webContents.id)) window.webContents.send('desktop-notes:prepare', requestId)
+  })
+  return withTimeout(waiting).finally(() => preparations.delete(requestId))
+}
+function releaseWindows(windows) {
+  for (const window of windows) if (window && !window.isDestroyed()) window.webContents.send('desktop-notes:release')
+}
+function ensureSaved(result) {
+  if (!result.accepted) throw new Error(result.error || '保存失败')
+}
+async function closeAttempt(noteId, windows, attempt) {
+  await Promise.all(windows.map(prepareWindow))
+  for (const [id, window] of desktopNoteWindows) {
+    if (noteId && id !== noteId) continue
+    if (!attempt.active) throw new Error('保存超时')
+    ensureSaved(await sendDesktopNoteCommand({ type: 'patch', id, patch: { bounds: window.getBounds() } }))
+  }
+  if (!attempt.active) throw new Error('保存超时')
+  ensureSaved(await sendDesktopNoteCommand({ type: 'barrier', id: '' }))
+  if (!attempt.active) throw new Error('保存超时')
+  if (noteId) ensureSaved(await sendDesktopNoteCommand({ type: 'closed', id: noteId }))
+  if (!attempt.active) throw new Error('保存超时')
+  session.defaultSession.flushStorageData()
+}
+function coordinateClose(noteId) {
+  if (exitOperation) return exitOperation
+  if (noteId && closingNotes.has(noteId)) return closingNotes.get(noteId)
+  const operation = (async () => {
+    // 退出先等待正在进行的单窗关闭，避免两条流程同时操作同一窗口。
+    if (!noteId) await Promise.all(closingNotes.values())
+    while (true) {
+      const windows = noteId ? [desktopNoteWindows.get(noteId)] : [mainWindow, ...desktopNoteWindows.values()]
+      const attempt = { active: true }
+      try {
+        await withTimeout(closeAttempt(noteId, windows, attempt))
+        if (noteId) closeDesktopNoteWindow(noteId, true)
+        else { isQuitting = true; app.quit() }
+        return { accepted: true, requestId: '', version: snapshotVersion }
+      } catch (error) {
+        attempt.active = false
+        releaseWindows(windows)
+        const owner = noteId ? desktopNoteWindows.get(noteId) : mainWindow
+        const options = {
+          type: 'warning', title: '内容尚未保存', message: error.message,
+          detail: '窗口和草稿已保留。可以重试，或取消本次关闭。',
+          buttons: ['重试', noteId ? '取消关闭' : '取消退出', noteId ? '放弃未保存修改并关闭' : '放弃未保存修改并退出'],
+          defaultId: 1, cancelId: 1, noLink: true,
+        }
+        const choice = owner && !owner.isDestroyed()
+          ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+        if (choice.response === 0) continue
+        if (choice.response === 2) {
+          if (noteId) { discardedNoteWindows.add(noteId); closeDesktopNoteWindow(noteId, true) }
+          else { isQuitting = true; app.quit() }
+        }
+        return { accepted: false, requestId: '', version: snapshotVersion, error: error.message }
+      }
+    }
+  })().finally(() => { if (noteId) closingNotes.delete(noteId); else exitOperation = null })
+  if (noteId) closingNotes.set(noteId, operation)
+  else exitOperation = operation
+  return operation
+}
+
+ipcMain.on('desktop-notes:ack', (event, result) => {
+  if (isMainRenderer(event.sender)) noteRequests.acknowledge({ ...result, version: snapshotVersion })
+})
+ipcMain.on('desktop-notes:ready', (event) => {
+  if (!isMainRenderer(event.sender) && !desktopNoteIdFromSender(event.sender)) return
+  readyEditors.add(event.sender.id)
+  for (const [requestId, pending] of preparations) {
+    if (pending.senderId === event.sender.id) event.sender.send('desktop-notes:prepare', requestId)
+  }
+})
+ipcMain.on('desktop-notes:prepared', (event, requestId, error) => {
+  const pending = preparations.get(requestId)
+  if (!pending || pending.senderId !== event.sender.id) return
+  if (error) pending.reject(new Error(String(error)))
+  else pending.resolve()
+})
 
 function sendDesktopNoteSnapshot(noteId) {
   const noteWindow = desktopNoteWindows.get(noteId)
   const note = desktopNoteSnapshots.get(noteId)
   if (!noteWindow || noteWindow.isDestroyed() || !note) return
-  noteWindow.webContents.send('desktop-notes:snapshot', note)
+  noteWindow.webContents.send('desktop-notes:snapshot', { ...note, version: snapshotVersion })
 }
 
 function closeDesktopNoteWindow(noteId, suppressEvent = false) {
@@ -426,6 +539,9 @@ function createDesktopNoteWindow(note) {
     },
   })
   desktopNoteWindows.set(note.id, noteWindow)
+  noteWindow.webContents.on('did-start-loading', () => readyEditors.delete(noteWindow.webContents.id))
+  const noteContentsId = noteWindow.webContents.id
+  noteWindow.webContents.on('destroyed', () => readyEditors.delete(noteContentsId))
   noteWindow.webContents.session.setPermissionRequestHandler(
     (_webContents, _permission, callback) => callback(false),
   )
@@ -450,13 +566,11 @@ function createDesktopNoteWindow(note) {
 
   noteWindow.on('move', reportBounds)
   noteWindow.on('resize', reportBounds)
-  noteWindow.on('close', () => {
+  noteWindow.on('close', (event) => {
     if (boundsTimer) clearTimeout(boundsTimer)
-    if (isQuitting) return
-    // 用户拖动后立刻关闭时，防抖计时器可能还没落盘；关闭前强制提交最终位置。
-    sendDesktopNoteCommand({ type: 'patch', id: note.id, patch: { bounds: noteWindow.getBounds() } })
-    if (suppressedDesktopNoteCloses.delete(note.id)) return
-    sendDesktopNoteCommand({ type: 'closed', id: note.id })
+    if (isQuitting || suppressedDesktopNoteCloses.delete(note.id)) return
+    event.preventDefault()
+    void coordinateClose(note.id)
   })
   noteWindow.on('closed', () => {
     desktopNoteWindows.delete(note.id)
@@ -500,14 +614,14 @@ function syncDesktopNoteWindows(notes) {
       note.isOpen = false
       sendDesktopNoteCommand({ type: 'patch', id: note.id, patch: { isOpen: false } })
     }
-    if (note.isOpen) {
+    if (note.isOpen && !discardedNoteWindows.has(note.id)) {
       if (!noteWindow || noteWindow.isDestroyed()) createDesktopNoteWindow(note)
       else {
         noteWindow.setAlwaysOnTop(note.alwaysOnTop)
         sendDesktopNoteSnapshot(note.id)
       }
     } else if (noteWindow && !noteWindow.isDestroyed()) {
-      closeDesktopNoteWindow(note.id, true)
+      if (!closingNotes.has(note.id) && !exitOperation) void coordinateClose(note.id)
     }
   }
 
@@ -535,6 +649,11 @@ function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  mainWindow.webContents.on('did-start-loading', () => {
+    rendererVersion = -1
+    readyEditors.delete(mainWindow.webContents.id)
   })
 
   mainWindow.on('close', (event) => {
@@ -573,9 +692,15 @@ ipcMain.on('storage:changed', (event) => {
   scheduleStorageFlush(event.sender.session)
 })
 
-ipcMain.handle('desktop-notes:sync', (event, notes) => {
+ipcMain.handle('desktop-notes:sync', (event, notes, version) => {
   if (!isMainRenderer(event.sender)) return { synced: false }
+  if (!Number.isSafeInteger(version) || version < rendererVersion) return { synced: false }
+  rendererVersion = version
+  snapshotVersion += 1
   syncDesktopNoteWindows(notes)
+  for (const note of desktopNoteSnapshots.values()) {
+    event.sender.send('desktop-notes:snapshot', { ...note, version: snapshotVersion })
+  }
   // localStorage 由渲染进程写入；同步窗口后立刻要求 Chromium 刷盘，
   // 降低进程异常退出时刚编辑的便笺丢失概率。
   event.sender.session.flushStorageData()
@@ -584,24 +709,26 @@ ipcMain.handle('desktop-notes:sync', (event, notes) => {
 
 ipcMain.handle('desktop-notes:show', (event, requestedId) => {
   if (!isMainRenderer(event.sender)) return { shown: false }
-  const noteId = String(requestedId ?? '').trim()
+  const noteId = safeNoteId(requestedId)
   const note = desktopNoteSnapshots.get(noteId)
   if (!note) return { shown: false }
+  discardedNoteWindows.delete(noteId)
   createDesktopNoteWindow({ ...note, isOpen: true })
   return { shown: true }
 })
 
 ipcMain.handle('desktop-notes:get', (event, requestedId) => {
   const senderId = desktopNoteIdFromSender(event.sender)
-  const noteId = String(requestedId ?? '').trim()
-  if (!senderId || senderId !== noteId) return null
-  return desktopNoteSnapshots.get(noteId) ?? null
+  const noteId = safeNoteId(requestedId)
+  if (!isMainRenderer(event.sender) && (!senderId || senderId !== noteId)) return null
+  const note = desktopNoteSnapshots.get(noteId)
+  return note ? { ...note, version: snapshotVersion } : null
 })
 
-ipcMain.handle('desktop-notes:patch', (event, requestedId, patch) => {
+ipcMain.handle('desktop-notes:patch', (event, requestedId, patch, requestId) => {
   const senderId = desktopNoteIdFromSender(event.sender)
-  const noteId = String(requestedId ?? '').trim()
-  if (!senderId || senderId !== noteId || !patch || typeof patch !== 'object') {
+  const noteId = safeNoteId(requestedId)
+  if ((!isMainRenderer(event.sender) && (!senderId || senderId !== noteId)) || !patch || typeof patch !== 'object') {
     return { accepted: false }
   }
 
@@ -612,38 +739,20 @@ ipcMain.handle('desktop-notes:patch', (event, requestedId, patch) => {
   }
   if (typeof patch.alwaysOnTop === 'boolean') {
     safePatch.alwaysOnTop = patch.alwaysOnTop
-    const noteWindow = desktopNoteWindows.get(noteId)
-    if (noteWindow && !noteWindow.isDestroyed()) noteWindow.setAlwaysOnTop(patch.alwaysOnTop)
   }
   if (Object.keys(safePatch).length === 0) return { accepted: false }
-  sendDesktopNoteCommand({ type: 'patch', id: noteId, patch: safePatch })
-  return { accepted: true }
+  return sendDesktopNoteCommand({ type: 'patch', id: noteId, patch: safePatch },
+    safeRequestId(requestId) ? `${noteId}:${safeRequestId(requestId)}` : undefined)
 })
 
-ipcMain.on('desktop-notes:flush', (event, requestedId, content) => {
+ipcMain.handle('desktop-notes:action', (event, requestedId, action, requestId) => {
   const senderId = desktopNoteIdFromSender(event.sender)
-  const noteId = String(requestedId ?? '').trim()
-  if (!senderId || senderId !== noteId || typeof content !== 'string') return
-  sendDesktopNoteCommand({
-    type: 'patch',
-    id: noteId,
-    patch: { content: content.slice(0, DESKTOP_NOTE_CONTENT_MAX_LENGTH) },
-  })
-})
-
-ipcMain.handle('desktop-notes:action', (event, requestedId, action) => {
-  const senderId = desktopNoteIdFromSender(event.sender)
-  const noteId = String(requestedId ?? '').trim()
-  if (!senderId || senderId !== noteId) return { accepted: false }
-  const allowed = new Set(['close', 'delete', 'add-today', 'add-tomorrow'])
-  if (!allowed.has(action)) return { accepted: false }
-
-  if (action === 'close') closeDesktopNoteWindow(noteId)
-  else {
-    sendDesktopNoteCommand({ type: action, id: noteId })
-    if (action === 'delete') closeDesktopNoteWindow(noteId, true)
-  }
-  return { accepted: true }
+  const noteId = safeNoteId(requestedId)
+  if (!isMainRenderer(event.sender) && (!senderId || senderId !== noteId)) return { accepted: false }
+  if (!['close', 'delete', 'add-today', 'add-tomorrow'].includes(action)) return { accepted: false }
+  if (action === 'close') return coordinateClose(noteId)
+  return sendDesktopNoteCommand({ type: action, id: noteId },
+    safeRequestId(requestId) ? `${noteId}:${safeRequestId(requestId)}` : undefined)
 })
 
 ipcMain.handle('ai:summary', async (event, request) => {
@@ -759,6 +868,7 @@ ipcMain.handle('settings:update-global-shortcut', async (event, request) => {
 })
 
 if (!gotSingleInstanceLock) {
+  isQuitting = true
   app.quit()
 } else {
   app.on('second-instance', () => {
@@ -794,8 +904,12 @@ app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
-  isQuitting = true
+app.on('before-quit', (event) => {
+  if (!isQuitting) {
+    event.preventDefault()
+    quitApp()
+    return
+  }
   if (storageFlushTimer) {
     clearTimeout(storageFlushTimer)
     storageFlushTimer = null

@@ -1,7 +1,7 @@
 {
   "name": "personal-command-deck",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A lightweight local personal command dashboard.",
   "author": "syf14",
   "license": "MIT",
@@ -17,7 +17,8 @@
     "dist:desktop": "npm run clean:release && npm run build && electron-builder --config.electronDist=node_modules/electron/dist && npm run prune:release",
     "test": "vitest run",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:desktop": "node --test scripts/note-requests.check.cjs && npm run build && node scripts/test-desktop.mjs"
   },
   "build": {
     "appId": "com.personal.commanddeck",

@@ -1,3 +1,4 @@
+import { SavedDesktopNoteCard } from './SavedDesktopNoteCard'
 import { useEffect, useRef, useState } from 'react'
 import {
   CalendarPlus,
@@ -17,6 +18,10 @@ import { useDashboardStore } from '../../state/deckContext'
 import type { DesktopNote } from '../../types'
 
 function DesktopNoteCard({ note }: { note: DesktopNote }) {
+  return isDesktopRuntime() ? <SavedDesktopNoteCard note={note} /> : <LocalDesktopNoteCard note={note} />
+}
+
+function LocalDesktopNoteCard({ note }: { note: DesktopNote }) {
   const { showNotice } = useDashboardStore()
   const {
     updateNote,

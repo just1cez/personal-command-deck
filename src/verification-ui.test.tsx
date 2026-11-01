@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { ReviewDraft } from './views/review/ReviewDraft'
 import { Dialog } from './components/ui/Dialog'
 import { defaultState } from './state/defaults'
 import { STORAGE_KEY } from './config/constants'
@@ -145,4 +146,19 @@ describe('headless UI regressions (no desktop input)', () => {
     await act(async () => finishes[0](aiResponse('older result')))
     expect(container.querySelector('output')?.textContent).toBe('latest result')
   })
+})
+
+it('shows request failures with settings closed and clears the error on retry', async () => {
+  const state = structuredClone(defaultState)
+  state.ai = { ...state.ai, enabled: true, apiKey: 'synthetic-key' }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  const fetch = vi.fn().mockRejectedValueOnce(new Error('request failed')).mockResolvedValueOnce(aiResponse('retry succeeded'))
+  vi.stubGlobal('fetch', fetch)
+  await act(async () => root.render(<DeckProvider><ReviewDraft /></DeckProvider>))
+  expect(container.querySelector('.ai-settings-panel')).toBeNull()
+  await click(button('生成复盘草稿'))
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('request failed')
+  await click(button('生成复盘草稿'))
+  expect(container.querySelector('[role="alert"]')).toBeNull()
+  expect(container.querySelector('.review-summary')?.textContent).toContain('retry succeeded')
 })
